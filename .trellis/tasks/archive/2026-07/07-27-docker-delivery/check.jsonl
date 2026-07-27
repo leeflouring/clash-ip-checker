@@ -1,0 +1,6 @@
+{"file": ".trellis/tasks/07-27-docker-modernization/research/docker-operations-audit.md", "reason": "Operational findings and runtime acceptance checks"}
+{"file": ".trellis/tasks/07-27-docker-modernization/research/verification-strategy.md", "reason": "Full delivery verification gates"}
+{"file": ".trellis/spec/core/docker-job-contract.md", "reason": "Container E2E must preserve backend contract"}
+{"file": ".trellis/spec/core/docker-runtime-contract.md", "reason": "Image, headless runtime, security, and lifecycle assertions"}
+{"file": ".trellis/tasks/07-27-docker-delivery/research/validation.md", "reason": "Executed final verification evidence"}
+{"file": ".trellis/tasks/07-27-docker-delivery/research/check-review.md", "reason": "Independent final and cache-focused PASS reviews"}

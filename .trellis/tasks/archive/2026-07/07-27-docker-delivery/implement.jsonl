@@ -1,0 +1,6 @@
+{"file": ".trellis/tasks/07-27-docker-modernization/research/docker-operations-audit.md", "reason": "Container lifecycle, portability and hardening evidence"}
+{"file": ".trellis/tasks/07-27-docker-modernization/research/verification-strategy.md", "reason": "Docker smoke and E2E commands"}
+{"file": ".trellis/tasks/07-27-docker-delivery/research/runtime-pinning.md", "reason": "Pinned Mihomo assets, checksums, and runtime dependency evidence"}
+{"file": ".trellis/tasks/07-27-docker-delivery/research/docs-gap-audit.md", "reason": "Documentation reconciliation evidence"}
+{"file": ".trellis/tasks/07-27-docker-delivery/research/validation.md", "reason": "Executed image, runtime, E2E, lifecycle, and persistence evidence"}
+{"file": ".trellis/spec/core/docker-runtime-contract.md", "reason": "Executable image, headless server, Compose, and supervisor contract"}
