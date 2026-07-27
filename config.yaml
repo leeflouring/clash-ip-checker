@@ -1,31 +1,11 @@
-# 爬取任务队列最大值 一个订阅对应一个任务
-max_queue_size: 10  # 最大同时处理的任务数 (建议 5-20)
-
-# 缓存策略
-max_age: 360      # 缓存有效期 (秒), 0 表示不缓存 (每次都重新检测)
-
-
-# 过滤设置
-skip_keywords:
-  - "剩余"
-  - "重置"
-  - "到期"
-  - "有效期"
-  - "官网"
-  - "网址"
-  - "更新"
-  - "公告"
-  - "建议"
-
-# 网络请求超时时间 秒
+max_queue_size: 10
+max_subscription_bytes: 5242880
+max_redirects: 3
+job_ttl: 3600
+max_jobs: 100
 request_timeout: 15
-
-# 优先数据源 (ping0 或 ippure), 默认 ping0
-source: "ping0"
-
-# 是否允许降级 (True/False), 默认 True
-# True: 主源失败时尝试备用源
+max_age: 360
+source: ping0
 fallback: true
-
-# 是否显示高级设置
-SHOW_ADVANCED_SETTINGS: false
+skip_keywords: ["剩余", "重置", "到期", "有效期", "官网", "网址", "更新", "公告", "建议"]
+show_advanced_settings: false

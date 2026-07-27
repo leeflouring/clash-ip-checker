@@ -15,11 +15,15 @@ class ClashController:
             "Content-Type": "application/json"
         }
 
-    async def version(self):
+    async def version(self, timeout=5):
         """Checks API availability."""
         try:
             async with aiohttp.ClientSession() as session:
-                async with session.get(f"{self.api_url}/version", headers=self.headers, timeout=5) as resp:
+                async with session.get(
+                    f"{self.api_url}/version",
+                    headers=self.headers,
+                    timeout=timeout,
+                ) as resp:
                     return resp.status == 200
         except Exception:
             return False

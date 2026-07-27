@@ -1,382 +1,1055 @@
-from contextlib import asynccontextmanager
-
-import hashlib
-import os
-import time
-import requests
 import asyncio
+import base64
+import copy
+import csv
+import hashlib
+import hmac
+import http.client
+import io
+import ipaddress
+import json
 import logging
-from fastapi import FastAPI, BackgroundTasks, HTTPException, Query, Request
-from fastapi.responses import FileResponse, PlainTextResponse, StreamingResponse
+import os
+import socket
+import ssl
+import sys
+import time
+from contextlib import asynccontextmanager
+from urllib.parse import parse_qs, urlencode, urljoin, urlsplit, urlunsplit
+
+import yaml
+from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi.responses import (
+    FileResponse,
+    JSONResponse,
+    PlainTextResponse,
+    StreamingResponse,
+)
+from fastapi.staticfiles import StaticFiles
+
 from core.checker_service import CheckerService
 from core.config import config
-import yaml
-import json
-from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
+from core.job_manager import JobManager, TERMINAL_STATUSES, save_file_atomic
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    # Startup
-    logger.info("Starting Job Manager Worker...")
-    await job_manager.start_worker()
-    yield
-    # Shutdown logic if needed
 
-app = FastAPI(lifespan=lifespan)
-
-@app.get("/ipcheck")
-async def root():
-    return FileResponse("templates/index.html")
-
-# Configuration
-# Fix: Allow DATA_DIR override via Env to match Clash SAFE_PATHS (e.g. /root/.config/mihomo/data)
-default_data_dir = os.path.join(os.getcwd(), "data")
-DATA_DIR = os.getenv("DATA_DIR", default_data_dir)
-os.makedirs(DATA_DIR, exist_ok=True)
-print(f"LOG: Using DATA_DIR: {DATA_DIR}", flush=True)
-
-import sys
-# ... imports ...
-
-# Global Service
-from core.job_manager import JobManager
-
-# ... imports ...
-
-# Global Service
-api_url = os.getenv("CLASH_API_URL", "http://127.0.0.1:9090")
-# checker_service = CheckerService(api_url=api_url) 
-# Initialized in main but logic moved
-checker_service = CheckerService(api_url=api_url) 
-job_manager = JobManager(checker_service)
-
-# Force standard logging...
-# ...
-
-# Force standard logging to stdout to properly show in Docker logs
 logging.basicConfig(
     level=logging.ERROR,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     stream=sys.stdout,
-    force=True
+    force=True,
 )
 logger = logging.getLogger("Main")
 
-def calc_md5(content) -> str:
-    if isinstance(content, str):
-        content = content.encode('utf-8')
-    return hashlib.md5(content).hexdigest()
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DATA_DIR = os.getenv("DATA_DIR", os.path.join(BASE_DIR, "data"))
+STATIC_DIR = os.path.join(BASE_DIR, "static")
+INDEX_PATH = os.path.join(BASE_DIR, "templates", "index.html")
+os.makedirs(DATA_DIR, exist_ok=True)
 
-def is_in_time_cache(file_path: str, max_age_seconds=None) -> bool:
-    """Checks if file modification time is within max_age."""
-    if max_age_seconds is None:
-        max_age_seconds = config.max_age
+checker_service = CheckerService(
+    api_url=os.getenv("CLASH_API_URL", "http://127.0.0.1:9090")
+)
+job_manager = JobManager(
+    checker_service,
+    max_queue_size=config.max_queue_size,
+    ttl=config.job_ttl,
+    max_jobs=config.max_jobs,
+    history_path=os.path.join(DATA_DIR, "history.json"),
+)
 
-    if not os.path.exists(file_path):
-        return False
-    mtime = os.path.getmtime(file_path)
-    return (time.time() - mtime) < max_age_seconds
 
-async def fetch_url_with_retry(target_url: str, timeout: int = None):
-    """Helper to fetch content with specific UA."""
+@asynccontextmanager
+async def lifespan(app):
+    await job_manager.start_worker()
+    try:
+        yield
+    finally:
+        await job_manager.stop_worker()
+
+
+app = FastAPI(lifespan=lifespan)
+app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+
+PROTECTED_ROUTES = {
+    "/api/status",
+    "/cancel",
+    "/check",
+    "/download",
+    "/status/stream",
+}
+
+
+@app.middleware("http")
+async def require_api_token(request, call_next):
+    expected = config.api_token
+    path = request.url.path
+    protected = (
+        path.startswith("/api/jobs")
+        or path.startswith("/api/history")
+        or path in PROTECTED_ROUTES
+    )
+    if expected and protected:
+        authorization = request.headers.get("Authorization", "")
+        supplied = (
+            authorization[7:]
+            if authorization.lower().startswith("bearer ")
+            else ""
+        )
+        if not supplied or not hmac.compare_digest(supplied, expected):
+            return JSONResponse(
+                {"detail": "valid Bearer token required"},
+                status_code=401,
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+    return await call_next(request)
+
+
+def hash_value(value):
+    if isinstance(value, str):
+        value = value.encode("utf-8")
+    return hashlib.sha256(value).hexdigest()
+
+
+def normalize_options(
+    skip_keywords=None,
+    request_timeout=None,
+    source=None,
+    fallback=None,
+    mode="fast",
+    headless=True,
+):
+    if isinstance(skip_keywords, str):
+        skip_keywords = [
+            keyword.strip()
+            for keyword in skip_keywords.split(",")
+            if keyword.strip()
+        ]
+    elif skip_keywords is None:
+        skip_keywords = list(config.skip_keywords)
+    else:
+        skip_keywords = [str(keyword).strip() for keyword in skip_keywords]
+        skip_keywords = [keyword for keyword in skip_keywords if keyword]
+
+    if len(skip_keywords) > 100 or any(len(keyword) > 100 for keyword in skip_keywords):
+        raise ValueError("Too many or overly long skip keywords")
+
+    timeout = config.request_timeout if request_timeout is None else int(request_timeout)
+    if not 1 <= timeout <= 120:
+        raise ValueError("request_timeout must be between 1 and 120 seconds")
+
+    source = source or config.source
+    if source not in {"ping0", "ippure"}:
+        raise ValueError("source must be ping0 or ippure")
+
+    if fallback is None:
+        fallback = config.fallback
+    elif not isinstance(fallback, bool):
+        raise ValueError("fallback must be true or false")
+
+    if mode not in {"fast", "browser"}:
+        raise ValueError("mode must be fast or browser")
+    if not isinstance(headless, bool):
+        raise ValueError("headless must be true or false")
+    if mode == "browser" and headless is not True:
+        raise ValueError("browser mode only supports headless=true")
+
+    return {
+        "fallback": fallback,
+        "request_timeout": timeout,
+        "skip_keywords": skip_keywords,
+        "source": source,
+        "mode": mode,
+        "headless": headless,
+    }
+
+
+def canonical_options(options):
+    return json.dumps(
+        options,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+
+
+def build_output_key(content, options):
+    return hash_value(content + b"\0" + canonical_options(options))
+
+
+def source_key(url):
+    return hash_value(url)
+
+
+def map_key(url, options):
+    return hash_value(url.encode("utf-8") + b"\0" + canonical_options(options))
+
+
+def map_path(url, options):
+    return os.path.join(DATA_DIR, f"{map_key(url, options)}.map")
+
+
+def is_in_time_cache(file_path, max_age_seconds=None):
+    max_age_seconds = config.max_age if max_age_seconds is None else max_age_seconds
+    return os.path.exists(file_path) and (
+        time.time() - os.path.getmtime(file_path)
+    ) < max_age_seconds
+
+
+def resolve_subscription_target(
+    target_url,
+    allow_private=None,
+    resolver=socket.getaddrinfo,
+):
+    parsed = urlsplit(target_url)
+    if (
+        parsed.scheme not in {"http", "https"}
+        or not parsed.hostname
+        or parsed.username
+        or parsed.password
+    ):
+        raise ValueError("Subscription URL must be a credential-free HTTP(S) URL")
+
+    try:
+        port = parsed.port or (443 if parsed.scheme == "https" else 80)
+    except ValueError as error:
+        raise ValueError("Subscription URL has an invalid port") from error
+
+    if allow_private is None:
+        allow_private = config.allow_private_subscriptions
+
+    try:
+        resolved = resolver(
+            parsed.hostname,
+            port,
+            type=socket.SOCK_STREAM,
+        )
+    except OSError as error:
+        raise ValueError("Subscription hostname could not be resolved") from error
+
+    if not resolved:
+        raise ValueError("Subscription hostname could not be resolved")
+    addresses = [address[4][0].split("%", 1)[0] for address in resolved]
+    if not allow_private:
+        for address in addresses:
+            if not ipaddress.ip_address(address).is_global:
+                raise ValueError("Private subscription targets are not allowed")
+    return parsed, addresses[0], port
+
+
+def validate_subscription_url(
+    target_url,
+    allow_private=None,
+    resolver=socket.getaddrinfo,
+):
+    resolve_subscription_target(target_url, allow_private, resolver)
+    return target_url
+
+
+def open_pinned_response(parsed, address, port, timeout, headers):
+    raw_socket = socket.create_connection((address, port), timeout=timeout)
+    connection = http.client.HTTPConnection(
+        parsed.hostname,
+        port,
+        timeout=timeout,
+    )
+    try:
+        if parsed.scheme == "https":
+            context = ssl.create_default_context()
+            raw_socket = context.wrap_socket(
+                raw_socket,
+                server_hostname=parsed.hostname,
+            )
+        connection.sock = raw_socket
+        path = urlunsplit(("", "", parsed.path or "/", parsed.query, ""))
+        connection.request(
+            "GET",
+            path,
+            headers={
+                **headers,
+                "Accept-Encoding": "identity",
+                "Host": parsed.netloc,
+            },
+        )
+        return connection, connection.getresponse()
+    except Exception:
+        connection.close()
+        raw_socket.close()
+        raise
+
+
+def fetch_subscription(
+    target_url,
+    timeout=None,
+    max_bytes=None,
+    max_redirects=None,
+    allow_private=None,
+    resolver=socket.getaddrinfo,
+    opener=open_pinned_response,
+    clock=time.monotonic,
+):
+    timeout = config.request_timeout if timeout is None else timeout
+    max_bytes = config.max_subscription_bytes if max_bytes is None else max_bytes
+    max_redirects = config.max_redirects if max_redirects is None else max_redirects
     headers = {"User-Agent": config.user_agent}
-    timeout_val = timeout if timeout is not None else config.request_timeout
-    print(f"[INFO] Downloading: {target_url} (Timeout: {timeout_val}s)", flush=True)
-    resp = await asyncio.to_thread(requests.get, target_url, headers=headers, timeout=timeout_val)
-    resp.raise_for_status()
-    return resp.content
+    current_url = target_url
+    deadline = clock() + timeout
+
+    for redirect_count in range(max_redirects + 1):
+        remaining = deadline - clock()
+        if remaining <= 0:
+            raise ValueError("Subscription download timed out")
+        parsed, address, port = resolve_subscription_target(
+            current_url,
+            allow_private,
+            resolver,
+        )
+        connection, response = opener(
+            parsed,
+            address,
+            port,
+            remaining,
+            headers,
+        )
+        try:
+            if response.status in {301, 302, 303, 307, 308}:
+                location = response.getheader("Location")
+                if not location or redirect_count >= max_redirects:
+                    raise ValueError("Subscription redirect limit exceeded")
+                current_url = urljoin(current_url, location)
+                continue
+            if response.status >= 400:
+                raise ValueError(
+                    f"Subscription returned HTTP {response.status}"
+                )
+
+            length = response.getheader("Content-Length")
+            if length and int(length) > max_bytes:
+                raise ValueError("Subscription exceeds size limit")
+
+            content = bytearray()
+            while True:
+                if clock() >= deadline:
+                    raise ValueError("Subscription download timed out")
+                chunk = response.read(64 * 1024)
+                if not chunk:
+                    return bytes(content)
+                content.extend(chunk)
+                if len(content) > max_bytes:
+                    raise ValueError("Subscription exceeds size limit")
+        finally:
+            response.close()
+            if connection:
+                connection.close()
+
+    raise ValueError("Subscription redirect limit exceeded")
+
+
+async def fetch_url_with_retry(target_url, timeout=None):
+    return await asyncio.to_thread(
+        fetch_subscription,
+        target_url,
+        timeout,
+    )
+
+
+def load_clash_yaml(data_bytes):
+    try:
+        data = yaml.safe_load(data_bytes)
+    except yaml.YAMLError as error:
+        raise ValueError("Invalid YAML") from error
+    proxies = data.get("proxies") if isinstance(data, dict) else None
+    if not isinstance(proxies, list) or not proxies:
+        raise ValueError("Clash YAML must contain a non-empty proxies list")
+    if not all(
+        isinstance(proxy, dict)
+        and isinstance(proxy.get("name"), str)
+        and proxy["name"].strip()
+        for proxy in proxies
+    ):
+        raise ValueError("Every proxy must have a non-empty name")
+    return data
+
 
 def is_valid_clash(data_bytes):
     try:
-        d = yaml.safe_load(data_bytes)
-        return isinstance(d, dict) and 'proxies' in d
-    except:
-        return False
-
-
-def save_file_atomic(file_path: str, content: bytes):
-    """
-    Atomic write: writes to .tmp then renames.
-    """
-    tmp_path = f"{file_path}.tmp"
-    try:
-        with open(tmp_path, 'wb') as f:
-            f.write(content)
-            f.flush()
-            os.fsync(f.fileno()) 
-        os.replace(tmp_path, file_path)
+        load_clash_yaml(data_bytes)
         return True
-    except Exception as e:
-        print(f"[ERROR] Failed to save file atomic: {e}", flush=True)
-        if os.path.exists(tmp_path):
-            os.remove(tmp_path)
+    except ValueError:
         return False
+
+
+def write_map_atomic(file_path, output_key):
+    save_file_atomic(file_path, output_key.encode("ascii"))
+
+
+def unwrap_subscription_url(url):
+    for _ in range(3):
+        parsed = urlsplit(url)
+        nested = parse_qs(parsed.query).get("url")
+        if "/check" not in parsed.path or not nested or not nested[0]:
+            break
+        url = nested[0]
+    return url
+
+
+def conversion_url(url):
+    parsed = urlsplit(url)
+    query = parse_qs(parsed.query)
+    query.update({"target": ["clash"], "ver": ["meta"], "flag": ["clash"]})
+    return urlunsplit(parsed._replace(query=urlencode(query, doseq=True)))
+
+
+async def fetch_valid_subscription(url, timeout):
+    content = await fetch_url_with_retry(url, timeout)
+    if is_valid_clash(content):
+        return content
+
+    converted = await fetch_url_with_retry(conversion_url(url), timeout)
+    if is_valid_clash(converted):
+        return converted
+
+    try:
+        decoded = base64.b64decode(content).decode("utf-8", errors="ignore")
+    except Exception:
+        decoded = ""
+    if "vmess://" in decoded or "vless://" in decoded:
+        raise ValueError(
+            "Received a raw node list; use a Clash-target subscription URL"
+        )
+    raise ValueError("Subscription is not a valid Clash YAML configuration")
+
+
+@app.get("/", include_in_schema=False)
+@app.get("/ipcheck")
+async def root():
+    return FileResponse(INDEX_PATH)
+
+
+@app.get("/health")
+async def health():
+    mihomo_ready = await checker_service.clash.version(timeout=1)
+    if not mihomo_ready:
+        return JSONResponse(
+            {"status": "unhealthy", "mihomo": "unreachable"},
+            status_code=503,
+        )
+    return {"status": "healthy", "mihomo": "ready"}
+
+
+def _job_or_404(job_id):
+    job = job_manager.get_job(job_id=job_id)
+    if not job:
+        raise HTTPException(404, "unknown job")
+    return job
+
+
+def mask_subscription_label(url):
+    parsed = urlsplit(url)
+    return f"{parsed.hostname} / …"
+
+
+def seed_results(proxies):
+    return [
+        {
+            "id": node_id,
+            "original_name": proxy["name"],
+            "name": proxy["name"],
+            "ip": "—",
+            "risk": "—",
+            "bot": "N/A",
+            "shared": "N/A",
+            "type": "—",
+            "native": "—",
+            "source": "",
+            "error": "",
+            "degraded": False,
+            "status": "pending",
+        }
+        for node_id, proxy in enumerate(proxies)
+    ]
+
+
+def build_job_document(job, selected_ids=None):
+    source = copy.deepcopy(job.source_document)
+    if not isinstance(source, dict):
+        with open(job.file_path, "r", encoding="utf-8") as input_file:
+            source = yaml.safe_load(input_file)
+
+    rows = {row["id"]: row for row in job.results}
+    if selected_ids is None:
+        selected_ids = set(rows)
+    selected_ids -= job.deleted_ids
+
+    proxies = []
+    renamed = {}
+    original_proxies = source.get("proxies", [])
+    for node_id, proxy in enumerate(original_proxies):
+        row = rows.get(node_id)
+        if node_id not in selected_ids or not row:
+            continue
+        proxy = copy.deepcopy(proxy)
+        original_name = proxy["name"]
+        proxy["name"] = row["name"]
+        renamed[original_name] = row["name"]
+        proxies.append(proxy)
+    source["proxies"] = proxies
+
+    groups = source.get("proxy-groups", [])
+    group_names = {
+        group.get("name")
+        for group in groups
+        if isinstance(group, dict) and group.get("name")
+    }
+    builtins = {"DIRECT", "REJECT", "REJECT-DROP", "PASS", "COMPATIBLE"}
+    for group in groups:
+        if not isinstance(group, dict) or not isinstance(group.get("proxies"), list):
+            continue
+        group["proxies"] = [
+            renamed[name] if name in renamed else name
+            for name in group["proxies"]
+            if name in renamed or name in group_names or name in builtins
+        ]
+    return source
+
+
+async def persist_job_document(job):
+    document = build_job_document(job)
+    content = yaml.safe_dump(
+        document,
+        allow_unicode=True,
+        sort_keys=False,
+    ).encode("utf-8")
+    await asyncio.to_thread(save_file_atomic, job.file_path, content)
+
+
+@app.post("/api/jobs")
+async def create_job(request: Request):
+    try:
+        body = await request.json()
+    except json.JSONDecodeError as error:
+        raise HTTPException(400, "request body must be JSON") from error
+    if not isinstance(body, dict):
+        raise HTTPException(400, "request body must be an object")
+
+    has_url = isinstance(body.get("url"), str) and bool(body["url"].strip())
+    has_yaml = isinstance(body.get("yaml"), str) and bool(body["yaml"].strip())
+    if has_url == has_yaml:
+        raise HTTPException(400, "provide exactly one non-empty url or yaml")
+
+    opts = body.get("options") or {}
+    if not isinstance(opts, dict):
+        raise HTTPException(400, "options must be an object")
+    try:
+        options = normalize_options(
+            skip_keywords=opts.get("skip_keywords"),
+            request_timeout=opts.get("request_timeout"),
+            source=opts.get("source"),
+            fallback=opts.get("fallback"),
+            mode=opts.get("mode", "fast"),
+            headless=opts.get("headless", True),
+        )
+        max_age = int(opts.get("max_age", config.max_age))
+        if not 0 <= max_age <= 604800:
+            raise ValueError("max_age must be between 0 and 604800 seconds")
+    except (TypeError, ValueError) as error:
+        raise HTTPException(400, str(error)) from error
+
+    if has_url:
+        url = unwrap_subscription_url(body["url"].strip())
+        try:
+            content = await fetch_valid_subscription(
+                url,
+                options["request_timeout"],
+            )
+        except ValueError as error:
+            raise HTTPException(400, str(error)) from error
+        except (OSError, TimeoutError, http.client.HTTPException, ssl.SSLError) as error:
+            raise HTTPException(502, "unable to download subscription") from error
+        skey = source_key(url)
+        label = mask_subscription_label(url)
+    else:
+        content = body["yaml"].encode("utf-8")
+        if len(content) > config.max_subscription_bytes:
+            raise HTTPException(413, "YAML exceeds size limit")
+        skey = hash_value(content)
+        label = "粘贴的 YAML"
+
+    try:
+        data = load_clash_yaml(content)
+    except ValueError as error:
+        raise HTTPException(400, str(error)) from error
+
+    output = build_output_key(content, options)
+    path = os.path.join(DATA_DIR, f"{output}.yaml")
+    try:
+        job = await job_manager.submit_job(
+            skey,
+            output,
+            path,
+            options=options,
+            max_age=max_age,
+            file_content=content,
+        )
+    except ValueError as error:
+        raise HTTPException(503, str(error)) from error
+
+    job.label = label
+    if not job.source_document:
+        job.source_document = copy.deepcopy(data)
+    if not job.results:
+        job.total = len(data["proxies"])
+        job.results = seed_results(data["proxies"])
+
+    return {
+        "job_id": job.job_id,
+        "status": job.status,
+        "total": job.total,
+        "label": job.label,
+    }
+
+
+@app.get("/api/jobs/{job_id}")
+async def job_snapshot(job_id: str):
+    return _job_or_404(job_id).snapshot()
+
+
+def history_summary(record):
+    statuses = [
+        row.get("status")
+        for row in record.get("results", [])
+        if isinstance(row, dict)
+    ]
+    return {
+        "job_id": record["job_id"],
+        "label": record["label"],
+        "status": record["status"],
+        "finish_time": record["finish_time"],
+        "total": record["total"],
+        "checked": statuses.count("checked"),
+        "failed": statuses.count("failed"),
+        "skipped": statuses.count("skipped"),
+    }
+
+
+@app.get("/api/history")
+async def history_list():
+    records = await job_manager.list_history()
+    return {"records": [history_summary(record) for record in records]}
+
+
+@app.get("/api/history/{job_id}")
+async def history_snapshot(job_id: str):
+    record = await job_manager.get_history(job_id)
+    if not record:
+        raise HTTPException(404, "unknown history record")
+    return record
+
+
+@app.delete("/api/history/{job_id}")
+async def history_delete(job_id: str):
+    deleted = await job_manager.delete_history(job_id)
+    if deleted is None:
+        raise HTTPException(404, "unknown history record")
+    if not deleted:
+        raise HTTPException(500, "failed to persist history deletion")
+    return {"status": "deleted", "job_id": job_id}
+
+
+@app.get("/api/jobs/{job_id}/events")
+async def job_events(job_id: str):
+    async def event_generator():
+        while True:
+            job = _job_or_404(job_id)
+            yield (
+                "data: "
+                + json.dumps(job.snapshot(), ensure_ascii=False)
+                + "\n\n"
+            )
+            if job.status in TERMINAL_STATUSES:
+                break
+            await asyncio.sleep(0.5)
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+@app.post("/api/jobs/{job_id}/cancel")
+async def job_cancel(job_id: str):
+    cancelled = await job_manager.cancel_job(job_id=job_id)
+    return {"status": "cancelled" if cancelled else "not_found_or_ignored"}
+
+
+def terminal_job(job_id):
+    job = _job_or_404(job_id)
+    if job.status not in TERMINAL_STATUSES:
+        raise HTTPException(409, "job must finish before results can be changed")
+    return job
+
+
+@app.put("/api/jobs/{job_id}/nodes/{node_id}")
+async def node_edit(job_id: str, node_id: int, request: Request):
+    job = terminal_job(job_id)
+    body = await request.json()
+    name = str(body.get("name", "")).strip() if isinstance(body, dict) else ""
+    if not name:
+        raise HTTPException(400, "name is required")
+    if len(name) > 200:
+        raise HTTPException(400, "name is too long")
+
+    async with job.lock:
+        row = next((item for item in job.results if item["id"] == node_id), None)
+        if not row:
+            raise HTTPException(404, "unknown node")
+        if any(
+            item["id"] != node_id and item["name"] == name
+            for item in job.results
+        ):
+            raise HTTPException(409, "node name must be unique")
+        row["name"] = name
+        await persist_job_document(job)
+        await job_manager.record_history(job)
+        return dict(row)
+
+
+@app.delete("/api/jobs/{job_id}/nodes/{node_id}")
+async def node_delete(job_id: str, node_id: int):
+    job = terminal_job(job_id)
+    async with job.lock:
+        row = next((item for item in job.results if item["id"] == node_id), None)
+        if not row:
+            raise HTTPException(404, "unknown node")
+        job.deleted_ids.add(node_id)
+        job.results.remove(row)
+        await persist_job_document(job)
+        await job_manager.record_history(job)
+    return {"status": "deleted", "id": node_id}
+
+
+@app.post("/api/jobs/{job_id}/nodes/{node_id}/recheck")
+async def node_recheck(job_id: str, node_id: int):
+    job = terminal_job(job_id)
+    async with job.lock:
+        row = next((item for item in job.results if item["id"] == node_id), None)
+        if not row:
+            raise HTTPException(404, "unknown node")
+        await persist_job_document(job)
+        checked_result = None
+
+        async def collect_result(current, total, message, result=None):
+            nonlocal checked_result
+            if result is not None:
+                checked_result = dict(result)
+
+        async with job_manager.execution_lock:
+            await job_manager.checker.run_check(
+                job.file_path,
+                progress_cb=collect_result,
+                options=job.options,
+                stop_event=asyncio.Event(),
+                target_nodes={row["name"]: node_id},
+            )
+        if not checked_result:
+            raise HTTPException(502, "node check did not return a result")
+        checked_result["original_name"] = row["original_name"]
+        job.results[job.results.index(row)] = checked_result
+        await persist_job_document(job)
+        await job_manager.record_history(job)
+        return dict(checked_result)
+
+
+@app.get("/api/jobs/{job_id}/raw")
+async def job_raw(job_id: str):
+    job = _job_or_404(job_id)
+    async with job.lock:
+        document = build_job_document(job)
+        yaml_text = yaml.safe_dump(
+            document,
+            allow_unicode=True,
+            sort_keys=False,
+        )
+    return PlainTextResponse(
+        yaml_text,
+        media_type="application/yaml",
+    )
+
+
+def requested_node_ids(body, job):
+    values = body.get("node_ids") if isinstance(body, dict) else None
+    if not values:
+        return {row["id"] for row in job.results}
+    try:
+        node_ids = {int(value) for value in values}
+    except (TypeError, ValueError) as error:
+        raise HTTPException(400, "node_ids must contain integers") from error
+    known_ids = {row["id"] for row in job.results}
+    if not node_ids <= known_ids:
+        raise HTTPException(400, "node_ids contains an unknown node")
+    return node_ids
+
+
+@app.post("/api/jobs/{job_id}/export")
+async def job_export(job_id: str, request: Request):
+    job = _job_or_404(job_id)
+    body = await request.json()
+    async with job.lock:
+        node_ids = requested_node_ids(body, job)
+        document = build_job_document(job, node_ids)
+        yaml_text = yaml.safe_dump(
+            document,
+            allow_unicode=True,
+            sort_keys=False,
+        )
+
+        fields = [
+            "id",
+            "name",
+            "ip",
+            "risk",
+            "bot",
+            "shared",
+            "type",
+            "native",
+            "source",
+            "degraded",
+            "status",
+        ]
+        csv_output = io.StringIO()
+        writer = csv.DictWriter(
+            csv_output,
+            fieldnames=fields,
+            extrasaction="ignore",
+        )
+        writer.writeheader()
+        for row in job.results:
+            if row["id"] in node_ids:
+                writer.writerow(row)
+        csv_text = "\ufeff" + csv_output.getvalue()
+        suffix = "selected" if len(node_ids) < len(job.results) else "all"
+    return {
+        "yaml": yaml_text,
+        "csv": csv_text,
+        "yaml_filename": f"clash-{suffix}.yaml",
+        "csv_filename": f"purity-{suffix}.csv",
+    }
+
 
 @app.get("/api/config")
 async def get_ui_config():
-    """Exposes UI configuration based on environment variables or config.yaml."""
-    return {"show_advanced_settings": config.show_advanced_settings}
+    return {
+        "show_advanced_settings": config.show_advanced_settings,
+        "token_required": bool(config.api_token),
+    }
+
 
 @app.get("/api/status")
 async def get_status_json(url: str = Query(..., description="Subscription URL")):
-    """Internal JSON status API."""
-    status = job_manager.get_status(url)
-    q_info = job_manager.get_queue_info()
-    
-    # Calculate simple position info
+    status = job_manager.get_status(source_key=source_key(unwrap_subscription_url(url)))
+    queue_info = job_manager.get_queue_info()
     response = {
         "job_status": status,
-        "global_queue_size": q_info["queue_size"],
-        "running_job": q_info["running_job"]
+        "global_queue_size": queue_info["queue_size"],
+        "running_job": queue_info["running_job"],
     }
-    
     if status["status"] == "queued":
-        response["message"] = f"In Queue. Total waiting: {q_info['queue_size']}"
-        
+        response["message"] = (
+            f"In queue. Total waiting: {queue_info['queue_size']}"
+        )
     return response
+
 
 @app.get("/check")
 async def ip_check(
-    request: Request, 
+    request: Request,
     url: str = Query(..., description="Subscription URL"),
     max_queue_size: int = Query(None, description="Max Queue Size"),
     max_age: int = Query(None, description="Max Cache Age"),
-    skip_keywords: str = Query(None, description="Skip keywords (comma separated)"),
+    skip_keywords: str = Query(None, description="Skip keywords"),
     request_timeout: int = Query(None, description="Request timeout"),
-    source: str = Query(None, description="Primary source (ping0/ippure)"),
+    source: str = Query(None, description="Primary source"),
     fallback: bool = Query(None, description="Fallback enabled"),
-    request_id: str = Query(None, description="Unique Request ID to prevent race conditions")
-): 
+    request_id: str = Query(None, description="Request ID"),
+):
+    created_file = False
+    file_path = None
     try:
-        # 0. Optimize: Unwrap Self-Referencing URL
-        # e.g. http://my-site.com/check?url=http://... -> http://...
-        if "check?url=" in url:
-            try:
-                parsed_wrapper = urlparse(url)
-                params_wrapper = parse_qs(parsed_wrapper.query)
-                if 'url' in params_wrapper and params_wrapper['url'][0]:
-                    unwrapped = params_wrapper['url'][0]
-                    print(f"[INFO] Optimized: unwrapped recursive URL to {unwrapped}", flush=True)
-                    url = unwrapped
-            except Exception as e:
-                print(f"[WARN] Failed to unwrap URL: {e}", flush=True)
+        url = unwrap_subscription_url(url)
+        options = normalize_options(
+            skip_keywords,
+            request_timeout,
+            source,
+            fallback,
+        )
+        current_max_age = config.max_age if max_age is None else int(max_age)
+        if current_max_age < 0:
+            raise ValueError("max_age must be zero or greater")
+        admission_limit = (
+            config.max_queue_size
+            if max_queue_size is None
+            else max(1, min(int(max_queue_size), config.max_queue_size))
+        )
 
-        # Construct Options Dict
-        options = {}
-        if max_queue_size is not None: options["max_queue_size"] = max_queue_size
-        if max_age is not None: options["max_age"] = max_age
-        if skip_keywords is not None: 
-            # Parse comma separated string
-            options["skip_keywords"] = [k.strip() for k in skip_keywords.split(",") if k.strip()]
-        if request_timeout is not None: options["request_timeout"] = request_timeout
-        if source is not None: options["source"] = source
-        if fallback is not None: options["fallback"] = fallback
+        content = await fetch_valid_subscription(
+            url,
+            options["request_timeout"],
+        )
+        output_key = build_output_key(content, options)
+        file_path = os.path.join(DATA_DIR, f"{output_key}.yaml")
+        existed = os.path.exists(file_path)
+        active_job = job_manager.get_active_by_output(output_key)
+        new_request = (
+            request_id
+            and active_job
+            and active_job.request_id != request_id
+        )
 
-        # Local limit overrides
-        current_max_queue = max_queue_size if max_queue_size is not None else config.max_queue_size
-        current_max_age = max_age if max_age is not None else config.max_age
-
-        # ... fetch & validate logic (unchanged) ...
-        # 1. Download Content (Initial)
-        content = await fetch_url_with_retry(url, timeout=options.get("request_timeout"))
-        
-        # 2. Validation & Auto-Conversion
-        if not is_valid_clash(content):
-             # ... auto convert logic (unchanged) ...
-             # (Copy existing logic carefully or use ... if not changing)
-            print("[INFO] Content is not valid Clash YAML. Attempting auto-conversion...", flush=True)
-            
-            try:
-                # Robust URL construction using urllib
-                parsed = urlparse(url)
-                query = parse_qs(parsed.query)
-                query.update({
-                    'target': ['clash'],
-                    'ver': ['meta'],
-                    'flag': ['clash']
-                })
-                new_query = urlencode(query, doseq=True)
-                new_url = urlunparse(parsed._replace(query=new_query))
-
-                print(f"[INFO] Retrying with auto-conversion parameters...", flush=True)
-                new_content = await fetch_url_with_retry(new_url, timeout=options.get("request_timeout"))
-                if is_valid_clash(new_content):
-                    content = new_content
-                    print(f"[INFO] Auto-conversion successful.", flush=True)
-                else:
-                     # ... error handling (unchanged) ...
-                    msg = "Invalid Clash Configuration. Expected YAML with 'proxies' key."
-                    try:
-                        import base64
-                        decoded = base64.b64decode(content).decode('utf-8', errors='ignore')
-                        if "vmess://" in decoded or "vless://" in decoded:
-                            msg = "Received Base64/Raw Node List. Please use a 'Clash' target subscription link."
-                    except:
-                        pass
-                    return PlainTextResponse(f"不支持的订阅类型： {msg}", status_code=400)
-            except Exception as e:
-                print(f"[WARN] Auto-conversion failed: {e}", flush=True)
-
-
-        # 3. Calc MD5 (of valid content)
-        md5_hash = calc_md5(content)
-        file_name = f"{md5_hash}.yaml"
-        file_path = os.path.join(DATA_DIR, file_name)
-
-        # Update Map (URL -> Content Hash)
-        url_hash = calc_md5(url)
-        # Note: Map file doesn't track options, so multiple configs for same URL share same map/hash?
-        # Actually file_name is hash of content, so content same = same file.
-        # But options might differ.
-        # If I change skip_keywords, output content changes.
-        # So caching based on INPUT CONTENT hash is slightly risky if output depends on runtime options.
-        # BUT: The input content (raw yaml) is what md5_hash is based on. 
-        # The output file overwrites this file.
-        # So if User A checks with keyword "A" and User B checks with keyword "B", 
-        # they might overwrite each other's cache if content is identical. (Race condition on cache).
-        # However, for this simplified system, we accept this risk or we'd need to salt the hash with options.
-        # Let's keep it simple: Cache is based on Source Content. Re-run overwrites.
-        
-        map_path = os.path.join(DATA_DIR, f"{url_hash}.map")
-        try:
-            with open(map_path, 'w') as f:
-                f.write(md5_hash)
-        except Exception as e:
-            print(f"[WARN] Failed to save map file: {e}", flush=True)
-        
-        # 4. Cache Check (Now using hash of VALID content)
-        exists = os.path.exists(file_path)
-        in_time_cache = is_in_time_cache(file_path, max_age_seconds=current_max_age)
-        # Check if this specific URL has a job in queue or running
-        is_active = job_manager.is_active_task(url)
-        
-        # Check if last status was cancelled (Bypass cache to allow retry)
-        last_job = job_manager.jobs.get(url)
-        is_cancelled = (last_job and last_job.status == "cancelled")
-        
-        # Check if this is a NEW request (different request_id means user wants fresh run)
-        is_new_request = (request_id and last_job and last_job.request_id != request_id)
-
-        # 5. 缓存命中：直接返回 (如果已被取消，或者是新请求ID，则不走缓存，强制重跑)
-        if exists and (in_time_cache or is_active) and not is_cancelled and not is_new_request:
-            print(f"[INFO] Hit cache/reuse for {file_name} (in_time_cache={in_time_cache}, active={is_active}).", flush=True)
-            if not is_active:
-                await job_manager.register_completed(url)
-            return FileResponse(file_path, media_type="application/x-yaml", filename="checked.yaml")
-        
-        # 6. 先检查队列容量（在保存文件之前）
-        q_info = job_manager.get_queue_info()
-        total_active = q_info["queue_size"] + (1 if q_info["running_job"] else 0)
-        
-        if total_active >= current_max_queue:
-            print(f"[WARN] Queue full ({total_active} >= {current_max_queue}).", flush=True)
-            if exists:
-                # 文件已存在（可能有旧的检测结果），返回已有文件
-                print(f"[INFO] Returning existing file (may contain old results).", flush=True)
-                return FileResponse(file_path, media_type="application/x-yaml", filename="clash.yaml", headers={"X-QC-Queue-Full": "1"})
-            else:
-                # 新文件，队列满无法处理，返回 503
-                return PlainTextResponse(
-                    "服务器繁忙，请稍后重试。当前检测队列已满。", 
-                    status_code=503,
-                    headers={"X-QC-Queue-Full": "1"}
+        if existed and (
+            is_in_time_cache(file_path, current_max_age) or active_job
+        ) and not new_request:
+            if not active_job:
+                active_job = await job_manager.register_completed(
+                    source_key(url),
+                    output_key,
+                    file_path,
+                    options,
                 )
-        
-        # 7. 队列未满，保存新文件（仅首次请求）
-        if not exists:
-            print(f"[INFO] New task for {file_name}.", flush=True)
-            # Async Atomic Save
-            loop = asyncio.get_running_loop()
-            if not await loop.run_in_executor(None, save_file_atomic, file_path, content):
-                return PlainTextResponse("Internal Write Error", status_code=500)
-        else:
-            # 缓存过期，保留已有文件，直接重新检测
-            print(f"[INFO] Cache stale for {file_name}, re-triggering (keeping existing file).", flush=True)
- 
-        # 8. Trigger Job with IP Limiting
+            write_map_atomic(map_path(url, options), output_key)
+            return FileResponse(
+                file_path,
+                media_type="application/x-yaml",
+                filename="checked.yaml",
+                headers={"X-Job-ID": active_job.job_id},
+            )
+
+        if not existed:
+            await asyncio.to_thread(save_file_atomic, file_path, content)
+            created_file = True
+
         try:
-             await job_manager.submit_job(url, file_path, user_ip=request.client.host, options=options, request_id=request_id)
-        except ValueError as ve:
-             # If user has a job running, 429 Too Many Requests
-             return PlainTextResponse(str(ve), status_code=429)
-        
-        return FileResponse(file_path, media_type="application/x-yaml", filename="clash.yaml")
+            job = await job_manager.submit_job(
+                source_key(url),
+                output_key,
+                file_path,
+                user_ip=request.client.host if request.client else None,
+                options=options,
+                request_id=request_id,
+                admission_limit=admission_limit,
+            )
+        except ValueError:
+            if created_file and os.path.exists(file_path):
+                os.remove(file_path)
+            if existed:
+                return FileResponse(
+                    file_path,
+                    media_type="application/x-yaml",
+                    filename="clash.yaml",
+                    headers={"X-QC-Queue-Full": "1"},
+                )
+            return PlainTextResponse(
+                "服务器繁忙，请稍后重试。当前检测队列已满。",
+                status_code=503,
+                headers={"X-QC-Queue-Full": "1"},
+            )
 
+        write_map_atomic(map_path(url, options), output_key)
+        return FileResponse(
+            file_path,
+            media_type="application/x-yaml",
+            filename="clash.yaml",
+            headers={"X-Job-ID": job.job_id},
+        )
+    except ValueError as error:
+        if created_file and file_path and os.path.exists(file_path):
+            os.remove(file_path)
+        return PlainTextResponse(str(error), status_code=400)
+    except (OSError, TimeoutError, http.client.HTTPException, ssl.SSLError):
+        return PlainTextResponse(
+            "Unable to download the subscription",
+            status_code=502,
+        )
+    except Exception as error:
+        logger.error("Subscription processing failed: %s", type(error).__name__)
+        return PlainTextResponse("Internal server error", status_code=500)
 
-    except Exception as e:
-        print(f"[ERROR] processing request: {type(e).__name__}: {e}", flush=True)
-        return PlainTextResponse(f"Error: {str(e)}", status_code=500)
 
 @app.post("/cancel")
-async def cancel_check(url: str = Query(..., description="Subscription URL to cancel"), request_id: str = Query(None)):
-    success = await job_manager.cancel_job(url, request_id)
-    if success:
-        return {"status": "cancelled"}
-    return {"status": "not_found_or_ignored"}
+async def cancel_check(
+    url: str = Query(..., description="Subscription URL"),
+    request_id: str = Query(None),
+):
+    success = await job_manager.cancel_job(
+        source_key=source_key(unwrap_subscription_url(url)),
+        request_id=request_id,
+    )
+    return {"status": "cancelled" if success else "not_found_or_ignored"}
+
 
 @app.get("/download")
-async def download_config(url: str):
-    url_hash = calc_md5(url)
-    map_path = os.path.join(DATA_DIR, f"{url_hash}.map")
-    
-    if os.path.exists(map_path):
-        try:
-            with open(map_path, 'r') as f:
-                target_hash = f.read().strip()
-            
-            file_path = os.path.join(DATA_DIR, f"{target_hash}.yaml")
-            if os.path.exists(file_path):
-                return FileResponse(file_path, media_type="application/x-yaml", filename="clash_checked.yaml")
-        except Exception as e:
-            print(f"[ERROR] Map read failed: {e}", flush=True)
-            pass
-            
-    return PlainTextResponse("File not found or expired. Please check again.", status_code=404)
+async def download_config(
+    url: str,
+    skip_keywords: str = None,
+    request_timeout: int = None,
+    source: str = None,
+    fallback: bool = None,
+):
+    try:
+        url = unwrap_subscription_url(url)
+        options = normalize_options(
+            skip_keywords,
+            request_timeout,
+            source,
+            fallback,
+        )
+        target_map = map_path(url, options)
+        with open(target_map, "r", encoding="ascii") as mapping:
+            output_key = mapping.read().strip()
+        file_path = os.path.join(DATA_DIR, f"{output_key}.yaml")
+        if os.path.exists(file_path):
+            return FileResponse(
+                file_path,
+                media_type="application/x-yaml",
+                filename="clash_checked.yaml",
+            )
+    except (OSError, ValueError):
+        pass
+    return PlainTextResponse(
+        "File not found or expired. Please check again.",
+        status_code=404,
+    )
+
 
 @app.get("/status/stream")
 async def stream_status(url: str = Query(..., description="Job URL")):
+    key = source_key(unwrap_subscription_url(url))
+
     async def event_generator():
         while True:
-            # Keep alive / Heartbeat?
-            if not url:
-                 yield f"data: {{}}\n\n"
-                 await asyncio.sleep(1)
-                 continue
+            job = job_manager.get_job(source_key=key)
+            status = job.snapshot() if job else {"status": "unknown"}
+            messages = job.consume_logs() if job else []
+            payloads = messages or [status.get("message")]
+            for message in payloads:
+                snapshot = dict(status)
+                if message:
+                    snapshot["message"] = message
+                yield "data: " + json.dumps(
+                    {
+                        "job_status": snapshot,
+                        "global_queue_size": job_manager.queue.qsize(),
+                    },
+                    ensure_ascii=False,
+                ) + "\n\n"
 
-            status_data = job_manager.get_status(url)
-            
-            # Retrieve queued logs to ensure we don't miss fast updates
-            job_obj = job_manager.jobs.get(url)
-            logs = await job_obj.get_and_clear_logs() if job_obj else []
-
-            if not logs:
-                # No new logs, just send current state (heartbeat)
-                data = json.dumps({
-                    "job_status": status_data,
-                    "global_queue_size": job_manager.queue.qsize()
-                })
-                yield f"data: {data}\n\n"
-            else:
-                # Send a separate event for each log message
-                for msg in logs:
-                    temp_status = status_data.copy()
-                    temp_status["message"] = msg
-                    data = json.dumps({
-                        "job_status": temp_status,
-                        "global_queue_size": job_manager.queue.qsize()
-                    })
-                    yield f"data: {data}\n\n"
-
-            if status_data["status"] in ["completed", "error", "unknown"]:
+            if status["status"] in {"completed", "cancelled", "error", "unknown"}:
                 break
-
-            await asyncio.sleep(1.0) # Keep 1s polling, but queue ensures no data loss
+            await asyncio.sleep(1)
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
 
+
 if __name__ == "__main__":
     import uvicorn
-    # Allow port configuration via env
-    port = int(os.getenv("PORT", 8000))
-    uvicorn.run(app, host="0.0.0.0", port=port)
 
+    uvicorn.run(app, host="0.0.0.0", port=int(os.getenv("PORT", 8000)))
