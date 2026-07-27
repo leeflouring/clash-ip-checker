@@ -1,876 +1,254 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="zh-CN">
-
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Clash IP 纯净度检测</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script>
-        tailwind.config = {
-            darkMode: 'class',
-        }
-    </script>
-    <style>
-        .terminal-logs::-webkit-scrollbar {
-            width: 8px;
-        }
-
-        .terminal-logs::-webkit-scrollbar-track {
-            background: #f3f4f6;
-        }
-
-        .dark .terminal-logs::-webkit-scrollbar-track {
-            background: #1f2937;
-        }
-
-        .terminal-logs::-webkit-scrollbar-thumb {
-            background: #d1d5db;
-            border-radius: 4px;
-        }
-
-        .dark .terminal-logs::-webkit-scrollbar-thumb {
-            background: #4b5563;
-        }
-
-        .glass {
-            background: rgba(255, 255, 255, 0.8);
-            backdrop-filter: blur(10px);
-        }
-
-        .dark .glass {
-            background: rgba(30, 41, 59, 0.7);
-        }
-    </style>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="检测 Clash 节点 IP 纯净度，并以表格预览、编辑和导出结果。">
+  <meta name="color-scheme" content="light">
+  <title>Clash IP Checker · 节点结果工作台</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230f766e'/%3E%3Cpath d='M9 8h14v4H13v8h10v4H9z' fill='white'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="/static/css/style.css">
 </head>
+<body>
+  <a class="skip-link" href="#main">跳到主要内容</a>
 
-<body
-    class="bg-gray-50 dark:bg-[#0d1117] text-gray-900 dark:text-white min-h-screen flex flex-col items-center pt-24 px-4 font-sans transition-colors duration-300">
-
-    <!-- Navbar -->
-    <nav
-        class="fixed top-0 left-0 right-0 z-50 glass border-b border-gray-200 dark:border-gray-800 transition-colors duration-300">
-        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-            <div class="flex items-center justify-between h-16">
-                <!-- Left: Logo & Badge -->
-                <div class="flex items-center space-x-4">
-                    <a href="https://tombcato.github.io/clash-ip-checker/" target="_blank"
-                        class="flex items-center space-x-2 hover:opacity-80 transition-opacity">
-                        <div class="text-orange-500">
-                            <svg class="w-6 h-6" fill="currentColor" viewBox="0 0 20 20">
-                                <path fill-rule="evenodd"
-                                    d="M11.3 1.046A1 1 0 0112 2v5h4a1 1 0 01.82 1.573l-7 10A1 1 0 018 18v-5H4a1 1 0 01-.82-1.573l7-10a1 1 0 011.12-.38z"
-                                    clip-rule="evenodd" />
-                            </svg>
-                        </div>
-                        <span class="text-xl font-bold tracking-tight whitespace-nowrap">
-                            <span class="text-green-600 dark:text-green-400">Clash</span> <span
-                                class="text-gray-900 dark:text-white">IP Checker</span>
-                        </span>
-                    </a>
-
-                    <div
-                        class="hidden md:inline-flex items-center px-3 py-1 rounded-full border border-blue-500/20 bg-blue-50/50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-300 text-xs font-bold shadow-sm backdrop-blur-sm">
-                        <span class="flex h-2 w-2 relative mr-2">
-                            <span
-                                class="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
-                            <span class="relative inline-flex rounded-full h-2 w-2 bg-blue-500"></span>
-                        </span>
-                        DOCKER DEMO
-                    </div>
-                </div>
-
-                <!-- Right: Icons -->
-                <div class="flex items-center space-x-4">
-                    <!-- Theme Toggle -->
-                    <button id="theme-btn" onclick="toggleTheme()"
-                        class="text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors">
-                        <!-- Sun Icon (Hidden by default in dark, shown in light? Logic handled by JS swapping InnerHTML usually, or simpler CSS display) -->
-                        <!-- Let's use JS to inject the right SVG -->
-                        <svg id="theme-icon" class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <!-- Default to Moon -->
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z">
-                            </path>
-                        </svg>
-                    </button>
-
-                    <!-- X / Twitter -->
-                    <a href="https://twitter.com" target="_blank"
-                        class="text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors">
-                        <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
-                            <path
-                                d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z" />
-                        </svg>
-                    </a>
-
-                    <!-- GitHub Star -->
-                    <a href="https://github.com/tombcato/clash-ip-checker" target="_blank"
-                        class="flex items-center space-x-1 bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 border border-gray-300 dark:border-gray-700 rounded-md px-3 py-1 transition-colors text-sm text-gray-700 dark:text-gray-300">
-                        <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
-                            <path fill-rule="evenodd" clip-rule="evenodd"
-                                d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z" />
-                        </svg>
-                        <span class="font-semibold">Star</span>
-                        <span id="github-star-count"
-                            class="bg-gray-200 dark:bg-gray-700 px-1.5 py-0.5 rounded text-xs ml-2">...</span>
-                    </a>
-                </div>
-            </div>
-        </div>
-    </nav>
-
-    <!-- Spacer for fixed header -->
-    <div class="h-8"></div>
-
-
-
-    <!-- Main Input Card -->
-    <div
-        class="w-full max-w-3xl glass border border-gray-200 dark:border-gray-700 rounded-2xl shadow-xl p-8 mb-8 transition-all hover:border-blue-400 dark:hover:border-gray-600">
-        <div class="flex flex-col space-y-4">
-            <label for="url-input"
-                class="text-sm font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wider">订阅地址
-                (Subscription URL)</label>
-            <div class="flex space-x-4">
-                <input type="text" id="url-input" placeholder="请在此粘贴您的订阅链接 (http://...)"
-                    class="flex-1 bg-gray-100 dark:bg-gray-900 border border-gray-300 dark:border-gray-700 rounded-xl px-4 py-3 text-gray-900 dark:text-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all placeholder-gray-500 dark:placeholder-gray-600">
-                <button id="check-btn" onclick="startCheck()"
-                    class="bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 px-8 rounded-xl transition-transform transform active:scale-95 shadow-lg shadow-blue-500/30 dark:shadow-blue-900/50 disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none">
-                    开始检测
-                </button>
-                <button id="stop-btn" onclick="stopCheck()"
-                    class="hidden bg-red-600 hover:bg-red-500 text-white font-bold py-3 px-8 rounded-xl transition-transform transform active:scale-95 shadow-lg shadow-red-500/30 dark:shadow-red-900/50">
-                    停止
-                </button>
-            </div>
-
-            <!-- Advanced Settings Toggle -->
-            <div class="pt-2" id="advanced-settings-container">
-                <button type="button" onclick="toggleSettings()"
-                    class="flex items-center text-xs text-gray-500 dark:text-gray-400 hover:text-blue-500 focus:outline-none">
-                    <svg id="settings-icon" class="w-4 h-4 mr-1 transform transition-transform" fill="none"
-                        stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
-                    </svg>
-                    高级设置 (Advanced Settings)
-                </button>
-                <div id="settings-panel"
-                    class="hidden mt-3 p-4 bg-gray-50 dark:bg-gray-900/50 rounded-lg border border-gray-200 dark:border-gray-700 grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
-
-                    <!-- Source Selection -->
-                    <div class="flex flex-col space-y-1">
-                        <label class="text-gray-600 dark:text-gray-400 font-semibold">检测源 (Source)</label>
-                        <select id="setting-source"
-                            class="bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded px-2 py-1.5 focus:ring-1 focus:ring-blue-500 outline-none">
-                            <option value="ping0" selected>Ping0 (Default)</option>
-                            <option value="ippure">IPPure</option>
-                        </select>
-                    </div>
-
-                    <!-- Fallback Toggle -->
-                    <div class="flex flex-col space-y-1">
-                        <label class="text-gray-600 dark:text-gray-400 font-semibold">自动降级 (Fallback)</label>
-                        <div class="flex items-center h-full">
-                            <input type="checkbox" id="setting-fallback"
-                                class="w-4 h-4 text-blue-600 rounded bg-gray-100 border-gray-300 dark:bg-gray-700 dark:border-gray-600 focus:ring-blue-500"
-                                checked>
-                            <span class="ml-2 text-gray-500 text-xs">主源失败时尝试备用源</span>
-                        </div>
-                    </div>
-
-                    <!-- Skip Keywords -->
-                    <div class="flex flex-col space-y-1 md:col-span-2">
-                        <label class="text-gray-600 dark:text-gray-400 font-semibold">跳过关键词 (包含关键词的节点将被跳过)</label>
-                        <input type="text" id="setting-skip" placeholder="剩余,重置,到期,有效期..."
-                            value="剩余,重置,到期,有效期,官网,网址,更新,公告,建议"
-                            class="w-full bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded px-2 py-1.5 focus:ring-1 focus:ring-blue-500 outline-none">
-                    </div>
-
-                    <!-- Max Age -->
-                    <div class="flex flex-col space-y-1">
-                        <label class="text-gray-600 dark:text-gray-400 font-semibold">缓存时间（只返回缓存结果）</label>
-                        <input type="number" id="setting-max-age" value="3600" min="0"
-                            class="w-full bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded px-2 py-1.5 focus:ring-1 focus:ring-blue-500 outline-none">
-                    </div>
-
-                    <!-- Timeout -->
-                    <div class="flex flex-col space-y-1">
-                        <label class="text-gray-600 dark:text-gray-400 font-semibold">请求超时 (每个节点检测最大时间)</label>
-                        <input type="number" id="setting-timeout" value="15" min="1" max="60"
-                            class="w-full bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded px-2 py-1.5 focus:ring-1 focus:ring-blue-500 outline-none">
-                    </div>
-
-                </div>
-            </div>
-
-            <p id="error-msg" class="text-red-500 dark:text-red-400 text-sm hidden"></p>
-        </div>
+  <header class="topbar">
+    <a class="brand" href="/ipcheck" aria-label="Clash IP Checker 首页">
+      <span class="brand-mark" aria-hidden="true">C</span>
+      <span>Clash IP Checker</span>
+    </a>
+    <div class="runtime">
+      <span class="runtime-dot" aria-hidden="true"></span>
+      <span id="state" aria-live="polite">等待任务</span>
     </div>
+  </header>
 
-    <!-- Live Status Panel (Hidden by default) -->
-    <div id="status-panel" class="w-full max-w-3xl hidden space-y-6">
-        <!-- Status Header -->
-        <div
-            class="flex justify-between items-center bg-white dark:bg-gray-800 rounded-lg p-4 border-l-4 border-blue-500 shadow-sm">
-            <div>
-                <h3 class="font-bold text-gray-800 dark:text-gray-200">当前任务</h3>
-                <p id="task-url" class="text-xs text-gray-500 truncate max-w-md">...</p>
-            </div>
-            <span id="status-badge"
-                class="px-3 py-1 rounded text-xs font-bold bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300">等待中</span>
+  <main id="main" class="shell">
+    <section class="intro" aria-labelledby="page-title">
+      <div>
+        <p class="eyebrow">节点纯净度检测</p>
+        <h1 id="page-title">把 YAML 里的结果，<br>变成一眼能读懂的表格。</h1>
+      </div>
+      <p class="intro-copy">提交订阅或粘贴 Clash YAML。结果会实时进入工作台，可筛选导出、改名、删除或单独重检。</p>
+    </section>
+
+    <section class="input-panel" aria-labelledby="input-title">
+      <form id="start-form">
+        <div class="section-heading">
+          <div>
+            <p class="step">01</p>
+            <h2 id="input-title">选择配置来源</h2>
+          </div>
+          <p class="privacy-note">订阅地址只用于本次请求，不会保存在浏览器。</p>
         </div>
 
-        <!-- Queue Alert -->
-        <div id="queue-box"
-            class="hidden bg-yellow-50 dark:bg-yellow-900/30 border border-yellow-200 dark:border-yellow-700 rounded-lg p-4 flex items-center space-x-3">
-            <div class="animate-spin rounded-full h-5 w-5 border-b-2 border-yellow-500"></div>
-            <div class="text-yellow-700 dark:text-yellow-200 text-sm">
-                <strong>排队中</strong>: <span id="queue-msg">...</span>
+        <fieldset class="source-fieldset">
+          <legend class="sr-only">配置来源</legend>
+          <div class="segmented" role="radiogroup" aria-label="配置来源">
+            <label>
+              <input type="radio" name="kind" value="url" checked>
+              <span>订阅 URL</span>
+            </label>
+            <label>
+              <input type="radio" name="kind" value="yaml">
+              <span>粘贴 / 上传 YAML</span>
+            </label>
+          </div>
+
+          <div id="url-pane" class="source-pane">
+            <label class="field-label" for="url">订阅地址</label>
+            <div class="input-row">
+              <input id="url" type="url" inputmode="url" placeholder="https://example.com/subscription" autocomplete="off">
+              <button class="primary" type="submit">开始检测</button>
             </div>
+            <p class="field-help">支持 HTTP(S) Clash 订阅；默认拒绝内网地址和带凭据的 URL。</p>
+          </div>
+
+          <div id="yaml-pane" class="source-pane" hidden>
+            <label class="field-label" for="yaml">YAML 内容</label>
+            <textarea id="yaml" rows="9" spellcheck="false" placeholder="proxies:&#10;  - name: node-a&#10;    type: ss"></textarea>
+            <div class="file-row">
+              <label class="file-button" for="yaml-file">从文件读取</label>
+              <input id="yaml-file" class="sr-only" type="file" accept=".yaml,.yml,application/yaml,text/yaml,text/plain">
+              <span id="file-name">支持 .yaml / .yml，最大 5 MB</span>
+              <button class="primary" type="submit">开始检测</button>
+            </div>
+          </div>
+        </fieldset>
+
+        <details class="advanced">
+          <summary>检测选项</summary>
+          <div class="option-grid">
+            <label>
+              <span>检测模式</span>
+              <select id="mode">
+                <option value="fast">快速 HTTP</option>
+                <option value="browser">浏览器兼容</option>
+              </select>
+            </label>
+            <label>
+              <span>主要数据源</span>
+              <select id="source">
+                <option value="ping0">Ping0</option>
+                <option value="ippure">IPPure</option>
+              </select>
+            </label>
+            <label>
+              <span>请求超时（秒）</span>
+              <input id="timeout" type="number" min="1" max="120" value="15">
+            </label>
+            <label>
+              <span>缓存时长（秒）</span>
+              <input id="max-age" type="number" min="0" max="604800" value="3600">
+            </label>
+            <label class="wide-option">
+              <span>跳过关键词（逗号分隔）</span>
+              <input id="skip" placeholder="剩余, 到期, 官网">
+            </label>
+            <label class="wide-option">
+              <span>API 令牌（服务启用时填写）</span>
+              <input id="api-token" type="password" autocomplete="off" placeholder="仅保留在当前页面内存">
+            </label>
+            <label class="check-option">
+              <input id="fallback" type="checkbox" checked>
+              <span>数据源失败时自动回退</span>
+            </label>
+            <p class="field-help wide-option">browser 模式固定使用服务器 headless shell，不支持 headed/GUI。</p>
+          </div>
+        </details>
+
+        <div class="form-footer">
+          <p id="form-error" class="form-error" role="alert"></p>
+          <button id="cancel" class="text-button danger-text" type="button" disabled>取消当前任务</button>
         </div>
+      </form>
+    </section>
 
-        <!-- Progress Log -->
-        <div class="bg-gray-900 rounded-xl border border-gray-800 overflow-hidden shadow-inner">
-            <div class="bg-gray-800 px-4 py-2 flex justify-between items-center text-xs text-gray-400">
-                <span>终端输出日志</span>
-                <span id="progress-text">0 / 0</span>
-            </div>
-            <div id="progress-bar-container" class="h-1 bg-gray-700 w-full">
-                <div id="progress-bar" class="h-full bg-blue-500 w-0 transition-all duration-300"></div>
-            </div>
-            <div id="log-window"
-                class="terminal-logs h-64 overflow-y-auto p-4 font-mono text-sm space-y-1 text-gray-300">
-                <!-- Logs here -->
-            </div>
+    <section class="history-panel" aria-labelledby="history-title">
+      <div class="history-heading">
+        <div>
+          <p class="step">02</p>
+          <h2 id="history-title">最近检测</h2>
         </div>
+        <button id="refresh-history" class="secondary" type="button">刷新</button>
+      </div>
+      <p id="history-status" class="history-status" aria-live="polite">正在加载…</p>
+      <ul id="history-list" class="history-list" aria-label="历史检测记录"></ul>
+    </section>
 
-        <!-- Action Area -->
-        <div id="action-area" class="text-center hidden space-y-4">
-
-            <!-- Result Link Box -->
-            <div
-                class="bg-white dark:bg-gray-800 rounded-xl p-4 border border-gray-200 dark:border-gray-700 flex flex-col space-y-2 shadow-sm">
-                <!-- Warning Message -->
-                <div
-                    class="bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-700/50 rounded p-2 mb-2 text-left">
-                    <p class="text-xs text-red-700 dark:text-red-300 leading-relaxed font-bold">
-                        ⚠️ 警告：这是 demo 功能只是作为 docker 版本演示，可能随时暂停！订阅链接就会失效，请下载修改后的 yaml 或部署自己的 docker 服务获取链接导入使用。
-                    </p>
-                </div>
-
-                <label for="result-url"
-                    class="text-sm font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wider self-start">新的带检测结果标注的订阅链接</label>
-                <div class="flex space-x-3 w-full">
-                    <input id="result-url" type="text" readonly onclick="this.select()"
-                        class="w-full bg-gray-100 dark:bg-gray-900 border border-gray-300 dark:border-gray-700 rounded-xl px-4 py-3 text-sm text-blue-600 dark:text-blue-300 font-mono focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all placeholder-gray-500 dark:placeholder-gray-600">
-                </div>
-            </div>
-
-            <div class="flex justify-center space-x-4">
-                <a id="download-btn" href="#" target="_blank"
-                    class="inline-flex items-center space-x-2 px-6 py-3 bg-green-600 hover:bg-green-500 rounded-xl text-white font-bold transition-all shadow-lg shadow-green-500/30 dark:shadow-green-900/50">
-                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                            d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path>
-                    </svg>
-                    <span>下载yaml配置文件</span>
-                </a>
-                <button onclick="resetView()"
-                    class="text-gray-500 hover:text-gray-800 dark:hover:text-white underline text-sm">检测其他</button>
-            </div>
+    <section id="workspace" class="workspace" aria-labelledby="results-title" hidden>
+      <div class="workspace-heading">
+        <div>
+          <p class="step">03</p>
+          <h2 id="results-title">检查结果</h2>
+          <p id="job-label" class="job-label">当前任务</p>
+          <p id="history-readonly" class="history-readonly" hidden>历史快照 · 只读</p>
         </div>
-    </div>
-
-    <script>
-        const statusPanel = document.getElementById('status-panel');
-        const urlInput = document.getElementById('url-input');
-        // ... (existing vars) ...
-        const checkBtn = document.getElementById('check-btn');
-        const errorMsg = document.getElementById('error-msg');
-        const logWindow = document.getElementById('log-window');
-        const progressBar = document.getElementById('progress-bar');
-        const progressText = document.getElementById('progress-text');
-        const statusBadge = document.getElementById('status-badge');
-        const queueBox = document.getElementById('queue-box');
-        const queueMsg = document.getElementById('queue-msg');
-        const taskUrlDisplay = document.getElementById('task-url');
-        const downloadBtn = document.getElementById('download-btn');
-        const actionArea = document.getElementById('action-area');
-
-        // --- Theme Logic ---
-        function initTheme() {
-            if (localStorage.theme === 'dark' || (!('theme' in localStorage) && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
-                document.documentElement.classList.add('dark');
-            } else {
-                document.documentElement.classList.remove('dark');
-            }
-            updateThemeIcon();
-        }
-
-        function toggleTheme() {
-            if (document.documentElement.classList.contains('dark')) {
-                document.documentElement.classList.remove('dark');
-                localStorage.theme = 'light';
-            } else {
-                document.documentElement.classList.add('dark');
-                localStorage.theme = 'dark';
-            }
-            updateThemeIcon();
-        }
-
-        function updateThemeIcon() {
-            const isDark = document.documentElement.classList.contains('dark');
-            const svg = document.getElementById('theme-icon');
-            if (!svg) return;
-
-            if (isDark) {
-                // Moon
-                svg.innerHTML = '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"></path>';
-            } else {
-                // Sun
-                svg.innerHTML = '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z"></path>';
-            }
-        }
-
-        // Initialize immediately
-        initTheme();
-        initConfig(); // Fetch UI config
-
-        // Wait for load to ensure DOM is ready
-        window.addEventListener('load', fetchGitHubStars);
-
-        async function initConfig() {
-            try {
-                const res = await fetch('/api/config');
-                if (res.ok) {
-                    const data = await res.json();
-                    if (data.show_advanced_settings === false) {
-                        const container = document.getElementById('advanced-settings-container');
-                        if (container) container.classList.add('hidden');
-                    }
-                }
-            } catch (e) {
-                console.log("Config fetch failed, using defaults");
-            }
-        }
-
-
-        function fetchGitHubStars() {
-            const cacheKey = 'github_stars';
-            const cacheTimeKey = 'github_stars_time';
-            const cacheDuration = 3600 * 1000; // 1 hour
-
-            const cached = localStorage.getItem(cacheKey);
-            const cachedTime = localStorage.getItem(cacheTimeKey);
-
-            if (cached && cachedTime && (Date.now() - cachedTime < cacheDuration)) {
-                document.getElementById('github-star-count').innerText = cached;
-                return;
-            }
-
-            fetch('https://api.github.com/repos/tombcato/clash-ip-checker')
-                .then(response => {
-                    if (!response.ok) throw new Error("Rate Limit or Network Error");
-                    return response.json();
-                })
-                .then(data => {
-                    if (data.stargazers_count) {
-                        const stars = data.stargazers_count;
-                        document.getElementById('github-star-count').innerText = stars;
-                        localStorage.setItem(cacheKey, stars);
-                        localStorage.setItem(cacheTimeKey, Date.now());
-                    }
-                })
-                .catch(err => {
-                    console.log("Star fetch skipped:", err);
-                    // Fallback to cache or hardcoded estimate if rate limited
-                    if (cached) document.getElementById('github-star-count').innerText = cached;
-                    else document.getElementById('github-star-count').innerText = "700+";
-                });
-        }
-
-        let evtSource = null;
-
-        // Restore active task from local storage on load
-        window.addEventListener('load', () => {
-            const lastUrl = localStorage.getItem('active_task_url');
-            if (lastUrl) {
-                // Check if it's actually running or done?
-                // Just restore view and connect stream. The stream will tell us if it's done.
-                showStatusView(lastUrl);
-                connectStream(lastUrl);
-            }
-        });
-
-
-        function toggleSettings() {
-            const panel = document.getElementById('settings-panel');
-            const icon = document.getElementById('settings-icon');
-            if (panel.classList.contains('hidden')) {
-                panel.classList.remove('hidden');
-                icon.style.transform = "rotate(180deg)";
-            } else {
-                panel.classList.add('hidden');
-                icon.style.transform = "rotate(0deg)";
-            }
-        }
-
-        function generateUUID() {
-            // Native support (HTTPS/Localhost)
-            if (typeof crypto !== 'undefined' && crypto.randomUUID) {
-                return crypto.randomUUID();
-            }
-            // Fallback for HTTP (Math.random)
-            return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
-                var r = Math.random() * 16 | 0, v = c == 'x' ? r : (r & 0x3 | 0x8);
-                return v.toString(16);
-            });
-        }
-
-        async function startCheck() {
-            if (checkBtn.disabled) return;
-
-            const url = urlInput.value.trim();
-            if (!url) return showError("请输入有效的订阅链接");
-
-            errorMsg.classList.add('hidden');
-            actionArea.classList.add('hidden'); // Clear previous results
-            logWindow.innerHTML = ''; // Clear logs explicitly to prevent confusion
-            checkBtn.disabled = true;
-            checkBtn.innerHTML = '<svg class="animate-spin -ml-1 mr-2 h-5 w-5 text-white inline-block" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg> 请求中...';
-
-            // Generate Request ID to prevent race conditions (cancel affecting new job)
-            const requestId = generateUUID();
-            localStorage.setItem('active_task_id', requestId);
-
-            // Gather Settings (Add checks since they might be hidden/null)
-            const sourceEl = document.getElementById('setting-source');
-            const fallbackEl = document.getElementById('setting-fallback');
-            const skipEl = document.getElementById('setting-skip');
-            const maxAgeEl = document.getElementById('setting-max-age');
-            const timeoutEl = document.getElementById('setting-timeout');
-
-            const source = sourceEl ? sourceEl.value : "ping0";
-            const fallback = fallbackEl ? fallbackEl.checked : true;
-            const skip = skipEl ? skipEl.value.trim() : "剩余,重置,到期,有效期,官网,网址,更新,公告,建议";
-            const maxAge = maxAgeEl ? maxAgeEl.value : 3600;
-            const timeout = timeoutEl ? timeoutEl.value : 15;
-
-            // Build Query Params
-            const params = new URLSearchParams();
-            params.append("url", url);
-            params.append("request_id", requestId);
-            params.append("source", source);
-            params.append("fallback", fallback);
-            if (skip) params.append("skip_keywords", skip);
-            if (maxAge) params.append("max_age", maxAge);
-            if (timeout) params.append("request_timeout", timeout);
-
-            // 1. Trigger Backend
-            try {
-                const res = await fetch(`/check?${params.toString()}`);
-
-                if (res.status === 429) {
-                    // Too many requests
-                    const txt = await res.text();
-                    showError("当前任务过多，请稍后再试: " + txt);
-                    checkBtn.disabled = false;
-                    checkBtn.innerText = "开始检测";
-                    return;
-                }
-
-                // Check for Queue Limit Header
-                if (res.headers.get("X-QC-Queue-Full")) {
-                    showError("超过服务器队列处理最大数量，请稍后再试");
-                    checkBtn.disabled = false;
-                    checkBtn.innerText = "开始检测";
-                    return;
-                }
-
-                if (!res.ok) {
-                    const txt = await res.text();
-                    throw new Error(txt || res.statusText);
-                }
-
-                // We switch to monitoring mode.
-                statusBadge.innerText = "连接中...";
-                statusBadge.className = "px-3 py-1 rounded text-xs font-bold bg-gray-700 text-gray-300 animate-pulse";
-
-                localStorage.setItem('active_task_url', url);
-                showStatusView(url);
-                toggleStopBtn(true);
-                connectStream(url);
-
-            } catch (e) {
-                showError("请求失败: " + e.message);
-                checkBtn.disabled = false;
-                checkBtn.innerText = "开始检测";
-            }
-        }
-
-        async function stopCheck() {
-            const url = localStorage.getItem('active_task_url');
-            if (!url) return;
-
-            const requestId = localStorage.getItem('active_task_id');
-
-            const stopBtn = document.getElementById('stop-btn');
-            stopBtn.disabled = true;
-            stopBtn.innerText = "停止中...";
-
-            try {
-                let cancelUrl = `/cancel?url=${encodeURIComponent(url)}`;
-                if (requestId) cancelUrl += `&request_id=${requestId}`;
-                await fetch(cancelUrl, { method: 'POST' });
-            } catch (e) {
-                console.error("Stop failed", e);
-            }
-        }
-
-        function toggleStopBtn(show) {
-            const startBtn = document.getElementById('check-btn');
-            const stopBtn = document.getElementById('stop-btn');
-
-            if (show) {
-                startBtn.classList.add('hidden');
-                stopBtn.classList.remove('hidden');
-                stopBtn.disabled = false;
-                stopBtn.innerText = "停止";
-            } else {
-                startBtn.classList.remove('hidden');
-                startBtn.disabled = false;
-                startBtn.innerText = "开始检测";
-                stopBtn.classList.add('hidden');
-            }
-        }
-
-        function showStatusView(url) {
-            statusPanel.classList.remove('hidden');
-            taskUrlDisplay.innerText = url;
-            urlInput.value = url;
-            // Disable input
-            urlInput.disabled = true;
-            toggleStopBtn(true);
-        }
-
-        function resetView() {
-            localStorage.removeItem('active_task_url');
-            if (evtSource) evtSource.close();
-            statusPanel.classList.add('hidden');
-            urlInput.disabled = false;
-            urlInput.value = "";
-            toggleStopBtn(false);
-            actionArea.classList.add('hidden');
-            logWindow.innerHTML = "";
-            progressBar.style.width = "0%";
-            statusBadge.innerText = "等待中";
-            statusBadge.className = "px-3 py-1 rounded text-xs font-bold bg-gray-700 text-gray-300";
-            queueBox.classList.add('hidden');
-        }
-
-        function connectStream(url) {
-            if (evtSource) evtSource.close();
-
-            evtSource = new EventSource(`/status/stream?url=${encodeURIComponent(url)}`);
-
-            evtSource.onmessage = (e) => {
-                const data = JSON.parse(e.data);
-                const status = data.job_status;
-
-                updateBadge(status.status);
-
-                // Handle Unknown/Expired (e.g. server restart)
-                if (status.status === 'unknown') {
-                    evtSource.close();
-                    statusBadge.innerText = "已过期";
-                    statusBadge.className = "px-3 py-1 rounded text-xs font-bold bg-gray-600 text-gray-400";
-                    queueBox.classList.remove('hidden');
-                    queueMsg.innerHTML = `
-                        <div class="flex justify-between items-center w-full">
-                            <span class="text-red-300">任务数据已丢失（服务可能已重启）</span>
-                            <button onclick="resetView()" class="bg-red-700 hover:bg-red-600 text-white px-3 py-1 rounded text-xs font-bold transition-colors">
-                                重试
-                            </button>
-                        </div>
-                    `;
-                    actionArea.classList.remove('hidden');
-                    downloadBtn.style.display = 'none';
-                    return;
-                }
-
-                // Queue
-                if (status.status === 'queued') {
-                    queueBox.classList.remove('hidden');
-                    queueMsg.innerText = `正在排队... (前方还有 ${data.global_queue_size} 个任务)`;
-                } else {
-                    queueBox.classList.add('hidden');
-                }
-
-                // Progress
-                const total = status.total || 1;
-                const current = status.current || 0;
-                const p = Math.min(100, (current / total) * 100);
-                progressBar.style.width = `${p}%`;
-                progressText.innerText = `${current} / ${total}`;
-
-                // Logs (DOM-based Dedup)
-                if (status.message) {
-                    const lastDiv = logWindow.lastElementChild;
-                    const shouldApped = !lastDiv || !lastDiv.textContent.includes(status.message);
-
-                    if (shouldApped) {
-                        const div = document.createElement('div');
-                        const time = new Date().toLocaleTimeString();
-
-                        if (status.message.includes("Result:")) {
-                            // Make Result lines stand out
-                            div.className = "mt-1 mb-1 py-1 text-green-300 font-mono border-l-4 border-green-500 pl-2 bg-green-900/20";
-                            // Replace text for cleaner look if desired, or just style it
-                            div.innerHTML = `<span class="text-xs text-green-700 opacity-50">[${time}]</span> ${status.message}`;
-                        } else if (status.message.includes("Cancelled")) {
-                            div.className = "mt-1 mb-1 py-1 text-yellow-300 font-mono border-l-4 border-yellow-500 pl-2 bg-yellow-900/20";
-                            div.innerHTML = `<span class="text-xs text-yellow-700 opacity-50">[${time}]</span> ${status.message}`;
-                        } else {
-                            div.innerHTML = `<span class="text-xs text-gray-600">[${time}]</span> ${status.message}`;
-                        }
-
-                        logWindow.appendChild(div);
-                        logWindow.scrollTop = logWindow.scrollHeight;
-                    }
-                }
-
-                // Done or Cancelled
-                if (status.status === 'completed' || status.status === 'cancelled') {
-                    evtSource.close();
-                    actionArea.classList.remove('hidden');
-                    toggleStopBtn(false);
-
-                    const checkLink = `${window.location.origin}/check?url=${encodeURIComponent(url)}`;
-                    const downloadLink = `${window.location.origin}/download?url=${encodeURIComponent(url)}`;
-
-                    const resultInput = document.getElementById('result-url');
-
-                    if (status.status === 'cancelled') {
-                        statusBadge.innerText = "已取消";
-                        statusBadge.className = "px-3 py-1 rounded text-xs font-bold bg-yellow-700 text-yellow-200";
-                        if (resultInput) resultInput.value = "Task Cancelled";
-                        downloadBtn.href = downloadLink;
-                        downloadBtn.style.display = 'inline-flex';
-                    } else {
-                        if (resultInput) resultInput.value = checkLink;
-                        downloadBtn.href = downloadLink;
-                        downloadBtn.style.display = 'inline-flex';
-                    }
-                }
-
-                // Error
-                if (status.status === 'error') {
-                    evtSource.close();
-                    actionArea.classList.remove('hidden');
-                    downloadBtn.style.display = 'none'; // Hide download
-                    toggleStopBtn(false);
-
-                    const resultInput = document.getElementById('result-url');
-                    if (resultInput) resultInput.value = "Error: Check logs";
-
-                    const err = document.createElement('div');
-                    err.className = "text-red-500 font-bold mt-2";
-                    err.innerText = `FATAL ERROR: ${status.error}`;
-                    logWindow.appendChild(err);
-                }
-            };
-
-            evtSource.onerror = (e) => {
-                // SSE 断线重连逻辑
-                console.warn("SSE connection error", e);
-                evtSource.close();
-
-                // 检查是否应该重连（任务未完成时才重连）
-                const lastStatus = statusBadge.innerText;
-                if (lastStatus === "检测完成" || lastStatus === "出错了" || lastStatus === "已过期" || lastStatus === "已取消") {
-                    console.log("Task already finished, not reconnecting.");
-                    return;
-                }
-
-                // 重连计数器（存储在 evtSource 对象上）
-                window.sseRetryCount = (window.sseRetryCount || 0) + 1;
-
-                if (window.sseRetryCount > 3) {
-                    console.error("SSE reconnect failed after 3 attempts");
-                    statusBadge.innerText = "连接断开";
-                    statusBadge.className = "px-3 py-1 rounded text-xs font-bold bg-red-900 text-red-200";
-                    queueBox.classList.remove('hidden');
-                    queueMsg.innerHTML = `
-                        <div class="flex justify-between items-center w-full">
-                            <span class="text-red-300">连接已断开，请刷新页面重试</span>
-                            <button onclick="location.reload()" class="bg-red-700 hover:bg-red-600 text-white px-3 py-1 rounded text-xs font-bold transition-colors">
-                                刷新页面
-                            </button>
-                        </div>
-                    `;
-                    return;
-                }
-
-                console.log(`SSE reconnecting in 3s... (attempt ${window.sseRetryCount}/3)`);
-                statusBadge.innerText = "重连中...";
-                statusBadge.className = "px-3 py-1 rounded text-xs font-bold bg-yellow-900 text-yellow-200 animate-pulse";
-
-                setTimeout(() => {
-                    connectStream(url);
-                }, 3000);
-            };
-
-            // 连接成功时重置重试计数
-            evtSource.onopen = () => {
-                window.sseRetryCount = 0;
-            };
-        }
-
-        async function copyResult() {
-            const copyText = document.getElementById("result-url");
-            if (!copyText || !copyText.value) return;
-
-            try {
-                // Try modern API first
-                await navigator.clipboard.writeText(copyText.value);
-                showCopySuccess();
-            } catch (err) {
-                // Fallback: Create temporary textarea
-                const textArea = document.createElement("textarea");
-                textArea.value = copyText.value;
-
-                // Ensure it's not visible but part of DOM
-                textArea.style.position = "fixed";
-                textArea.style.left = "-9999px";
-                textArea.style.top = "0";
-                document.body.appendChild(textArea);
-
-                textArea.focus();
-                textArea.select();
-
-                try {
-                    const successful = document.execCommand('copy');
-                    if (successful) showCopySuccess();
-                    else alert("复制失败，请手动选择复制。");
-                } catch (e) {
-                    alert("复制失败，请手动选择复制。");
-                }
-
-                document.body.removeChild(textArea);
-            }
-        }
-
-        function showCopySuccess() {
-            const btn = document.querySelector('button[onclick="copyResult()"]');
-            if (btn) {
-                const originalText = btn.innerText;
-                btn.innerText = "已复制!";
-                btn.classList.replace("bg-gray-700", "bg-green-600");
-                setTimeout(() => {
-                    btn.innerText = originalText;
-                    btn.classList.replace("bg-green-600", "bg-gray-700");
-                }, 2000);
-            }
-        }
-
-        function updateBadge(s) {
-            statusBadge.className = "px-3 py-1 rounded text-xs font-bold transition-colors ";
-            if (s === 'queued') {
-                statusBadge.classList.add('bg-yellow-900', 'text-yellow-200', 'animate-pulse');
-                statusBadge.innerText = "排队中";
-            }
-            else if (s === 'running') {
-                statusBadge.innerText = "检测中";
-                statusBadge.classList.add('bg-blue-900', 'text-blue-200', 'animate-pulse');
-            }
-            else if (s === 'completed') {
-                statusBadge.innerText = "检测完成";
-                statusBadge.classList.add('bg-green-900', 'text-green-200');
-            }
-            else if (s === 'error') {
-                statusBadge.innerText = "出错了";
-                statusBadge.classList.add('bg-red-900', 'text-red-200');
-            }
-            else {
-                statusBadge.innerText = s.toUpperCase();
-                statusBadge.classList.add('bg-gray-700', 'text-gray-300');
-            }
-        }
-
-        function showError(msg) {
-            errorMsg.innerText = msg;
-            errorMsg.classList.remove('hidden');
-        }
-    </script>
-    <!-- Footer -->
-    <footer class="mt-12 mb-6 text-center text-gray-400 dark:text-gray-500 text-sm">
-        <p>
-            Powered by Clash IP Checker &copy; 2025 |
-            <button onclick="togglePrivacyModal()"
-                class="hover:text-blue-500 transition-colors underline decoration-dotted">免责申明 (Privacy
-                Disclaimer)</button>
-        </p>
-    </footer>
-
-    <!-- Privacy Modal -->
-    <div id="privacy-modal" class="fixed inset-0 z-[100] hidden" aria-labelledby="modal-title" role="dialog"
-        aria-modal="true">
-        <!-- Backdrop -->
-        <div class="fixed inset-0 bg-gray-900/75 backdrop-blur-sm transition-opacity" onclick="togglePrivacyModal()">
+        <div class="progress-copy">
+          <strong id="progress-count">0 / 0</strong>
+          <span id="progress-message">准备中</span>
+          <button id="return-current" class="text-button" type="button" hidden>返回当前任务</button>
         </div>
+      </div>
 
-        <div class="fixed inset-0 z-10 w-screen overflow-y-auto">
-            <div class="flex min-h-full items-end justify-center p-4 text-center sm:items-center sm:p-0">
-                <!-- Modal Panel -->
-                <div
-                    class="relative transform overflow-hidden rounded-2xl bg-white dark:bg-gray-800 text-left shadow-2xl transition-all sm:my-8 sm:w-full sm:max-w-lg border border-gray-200 dark:border-gray-700">
-                    <div class="bg-white dark:bg-gray-800 px-4 pb-4 pt-5 sm:p-6 sm:pb-4">
-                        <div class="sm:flex sm:items-start">
-                            <div
-                                class="mx-auto flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-full bg-blue-100 dark:bg-blue-900 sm:mx-0 sm:h-10 sm:w-10">
-                                <svg class="h-6 w-6 text-blue-600 dark:text-blue-400" fill="none" viewBox="0 0 24 24"
-                                    stroke-width="1.5" stroke="currentColor">
-                                    <path stroke-linecap="round" stroke-linejoin="round"
-                                        d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" />
-                                </svg>
-                            </div>
-                            <div class="mt-3 text-center sm:ml-4 sm:mt-0 sm:text-left">
-                                <h3 class="text-xl font-bold leading-6 text-gray-900 dark:text-white" id="modal-title">
-                                    免责申明 (Data Privacy)</h3>
-                                <div class="mt-4 text-sm text-gray-500 dark:text-gray-300 space-y-3">
-                                    <p><strong class="text-gray-900 dark:text-gray-100">1. 数据隐私 (Data
-                                            Privacy)</strong><br>
-                                        本工具（Clash IP Checker）仅作为连接性测试用途。我们不会永久收集您的订阅内容。您的订阅链接和配置仅会在服务器本地缓存一段时间（默认 1
-                                        小时）以提升检测速度，之后将被自动清除。我们承诺不向任何第三方分享您的订阅数据。</p>
+      <div class="progress-track" aria-hidden="true">
+        <span id="progress-bar"></span>
+      </div>
 
-                                    <p><strong class="text-gray-900 dark:text-gray-100">2. 使用责任 (Usage
-                                            Responsibility)</strong><br>
-                                        本服务仅供技术研究与学习交流。用户需自行负责其使用的订阅源的合法性与安全性。请勿用于非法用途。</p>
+      <div class="result-summary" aria-label="结果统计">
+        <div><strong id="stat-total">0</strong><span>节点</span></div>
+        <div><strong id="stat-checked">0</strong><span>已检测</span></div>
+        <div><strong id="stat-risk">0</strong><span>高风险</span></div>
+        <div><strong id="stat-failed">0</strong><span>异常</span></div>
+      </div>
 
-                                    <p><strong class="text-gray-900 dark:text-gray-100">3. 免责声明
-                                            (Disclaimer)</strong><br>
-                                        本工具按“现状”提供，不包含任何形式的明示或暗示保证。开发者不对因使用本工具而导致的任何数据丢失、被墙或其他后果承担责任。</p>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="bg-gray-50 dark:bg-gray-700/50 px-4 py-3 sm:flex sm:flex-row-reverse sm:px-6">
-                        <button type="button" onclick="togglePrivacyModal()"
-                            class="inline-flex w-full justify-center rounded-lg bg-blue-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-blue-500 sm:ml-3 sm:w-auto transition-colors">我已知晓
-                            (Understood)</button>
-                    </div>
-                </div>
-            </div>
+      <div class="workspace-toolbar">
+        <div class="view-tabs" role="tablist" aria-label="结果视图">
+          <button class="view-tab active" type="button" role="tab" aria-selected="true" data-view="table">表格</button>
+          <button class="view-tab" type="button" role="tab" aria-selected="false" data-view="raw">原始 YAML</button>
         </div>
-    </div>
+        <div class="export-actions">
+          <span id="selected-count">未选择时导出全部</span>
+          <button id="copy-yaml" class="secondary" type="button" disabled>复制 YAML</button>
+          <button id="export-yaml" class="secondary" type="button" disabled>下载 YAML</button>
+          <button id="export-csv" class="secondary" type="button" disabled>下载 CSV</button>
+          <button id="open-clash" class="primary compact" type="button" disabled>在 Clash 中打开</button>
+        </div>
+      </div>
 
-    <script>
-        function togglePrivacyModal() {
-            const modal = document.getElementById('privacy-modal');
-            modal.classList.toggle('hidden');
-        }
-    </script>
+      <div id="table-view" role="tabpanel">
+        <div id="empty-state" class="empty-state">
+          <span aria-hidden="true">⌁</span>
+          <h3>结果会逐项出现在这里</h3>
+          <p>任务开始后无需刷新页面。</p>
+        </div>
+        <div id="table-wrap" class="table-wrap" hidden>
+          <table>
+            <thead>
+              <tr>
+                <th class="select-cell">
+                  <input id="select-all" type="checkbox" aria-label="选择当前可见节点">
+                </th>
+                <th class="filter-column name-column" data-sort-header="name" aria-sort="none">
+                  <button class="sort-button" type="button" data-sort="name" data-sort-label="节点名称" aria-label="按节点名称升序排序">节点名称 <span class="sort-arrow" aria-hidden="true">↕</span></button>
+                  <input id="filter-name" class="table-filter" type="search" placeholder="搜索名称" autocomplete="off" aria-label="按节点名称筛选">
+                </th>
+                <th data-sort-header="ip" aria-sort="none">
+                  <button class="sort-button" type="button" data-sort="ip" data-sort-label="出口 IP" aria-label="按出口 IP 升序排序">出口 IP <span class="sort-arrow" aria-hidden="true">↕</span></button>
+                </th>
+                <th data-sort-header="risk" aria-sort="none">
+                  <button class="sort-button" type="button" data-sort="risk" data-sort-label="风险" aria-label="按风险升序排序">风险 <span class="sort-arrow" aria-hidden="true">↕</span></button>
+                </th>
+                <th data-sort-header="shared" aria-sort="none">
+                  <button class="sort-button" type="button" data-sort="shared" data-sort-label="共享 / Bot" aria-label="按共享或 Bot 升序排序">共享 / Bot <span class="sort-arrow" aria-hidden="true">↕</span></button>
+                </th>
+                <th class="filter-column" data-sort-header="type" aria-sort="none">
+                  <button class="sort-button" type="button" data-sort="type" data-sort-label="属性" aria-label="按属性升序排序">属性 <span class="sort-arrow" aria-hidden="true">↕</span></button>
+                  <select id="filter-type" class="table-filter" data-all-label="全部属性" aria-label="按节点属性筛选">
+                    <option value="">全部属性</option>
+                  </select>
+                </th>
+                <th class="filter-column" data-sort-header="native" aria-sort="none">
+                  <button class="sort-button" type="button" data-sort="native" data-sort-label="原生性" aria-label="按原生性升序排序">原生性 <span class="sort-arrow" aria-hidden="true">↕</span></button>
+                  <select id="filter-native" class="table-filter" data-all-label="全部原生性" aria-label="按节点原生性筛选">
+                    <option value="">全部原生性</option>
+                  </select>
+                </th>
+                <th class="filter-column" data-sort-header="source" aria-sort="none">
+                  <button class="sort-button" type="button" data-sort="source" data-sort-label="数据源" aria-label="按数据源升序排序">数据源 <span class="sort-arrow" aria-hidden="true">↕</span></button>
+                  <select id="filter-source" class="table-filter" data-all-label="全部数据源" aria-label="按检测数据源筛选">
+                    <option value="">全部数据源</option>
+                  </select>
+                </th>
+                <th class="filter-column" data-sort-header="status" aria-sort="none">
+                  <button class="sort-button" type="button" data-sort="status" data-sort-label="状态" aria-label="按状态升序排序">状态 <span class="sort-arrow" aria-hidden="true">↕</span></button>
+                  <select id="filter-status" class="table-filter" aria-label="按检测状态筛选">
+                    <option value="">全部状态</option>
+                    <option value="pending">等待</option>
+                    <option value="checked">完成</option>
+                    <option value="failed">异常</option>
+                    <option value="skipped">跳过</option>
+                  </select>
+                </th>
+                <th class="actions-cell">操作</th>
+              </tr>
+            </thead>
+            <tbody id="rows"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div id="raw-panel" role="tabpanel" hidden>
+        <div class="raw-heading">
+          <p>这里显示当前编辑、删除后的完整 Clash 配置。</p>
+          <button id="refresh-raw" class="text-button" type="button">刷新</button>
+        </div>
+        <pre id="raw-view" tabindex="0">正在读取…</pre>
+      </div>
+    </section>
+  </main>
+
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+  <script src="/static/js/app.js"></script>
 </body>
-
 </html>
