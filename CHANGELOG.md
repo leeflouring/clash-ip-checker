@@ -2,6 +2,20 @@
 
 本文件记录项目的主要更改。
 
+## [Unreleased]
+### Added
+- Compose health check, `/health`, amd64/arm64 build example, browser-mode Playwright headless shell, and bilingual delivery docs.
+- IPQuery as the final opt-in fallback source and accessible sortable result-table headers.
+- Privacy-safe persistent read-only detection history with view/delete actions and `MAX_JOBS` retention.
+### Changed
+- Compose service is `clash-checker`, publishes only 8000, uses named `clash-data` at `/data`, loopback Mihomo listeners, non-root UID 10001, read-only rootfs, and `restart: unless-stopped`.
+- Browser mode is server-headless-only with no GUI/desktop or headed support; the headless shell is smaller than full Chromium but still increases the image over a fast-only base.
+- Result table header filters and sorting, visible-row selection, sanitized failure reasons, and correct default skipping for subscription metadata nodes.
+### Security
+- SSRF/private URL and URL-credential rejection is default; optional `ALLOW_PRIVATE_SUBSCRIPTIONS` and Bearer `API_TOKEN` are documented.
+### Breaking
+- Migrate old `./data`/root-path state into the `clash-data` volume; old host-path assumptions no longer apply.
+
 ## [1.1.0] - 2026-01-11
 
 ### ✨ 新增功能
