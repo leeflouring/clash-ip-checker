@@ -1,56 +1,102 @@
 # Clash IP Checker
 
-基于 FastAPI 与 Mihomo 的订阅节点 IP 检测服务。Mihomo 1.19.18，镜像支持 amd64/arm64；browser 模式使用 Playwright 的服务器 headless shell。
+**把 Clash / Mihomo 订阅中的节点，整理成可筛选、可编辑、可导出的 IP 检测结果。**
 
-## Compose 快速开始
+输入订阅链接，或粘贴、上传 Clash YAML；服务通过 Mihomo 逐个切换节点，查询出口 IP、风险和网络属性。浏览器里可以实时查看进度、定位异常、整理节点并导出配置。项目使用 FastAPI 和原生 HTML / CSS / JavaScript，推荐用 Docker Compose 部署。
 
-需要 Docker Compose plugin（命令为 `docker compose`）：
+[English](./README_EN.md) · [部署说明](./DEPLOY_GCP.md) · [许可证](./LICENSE)
+
+![Clash IP Checker 新建检测界面](./docs/assets/workspace-overview.png)
+
+<details>
+<summary>查看桌面结果与手机界面</summary>
+
+![桌面节点结果工作区](./docs/assets/workspace-results.png)
+
+<img src="./docs/assets/workspace-mobile.png" alt="手机端节点结果列表" width="390">
+
+</details>
+
+> 截图使用模拟节点与保留示例 IP（`203.0.113.0/24`），仅展示界面，不代表真实检测结果。
+
+## 能做什么
+
+- **三种输入**：订阅 URL、粘贴 YAML、上传 `.yaml` / `.yml` 文件；高级选项按需展开。
+- **逐节点检测**：快速 HTTP 模式或服务端无头浏览器模式；查看进度、出口 IP、风险、网络属性、数据来源及失败原因。
+- **整理结果**：按名称和属性筛选、按表头排序、勾选当前可见项；任务完成后可改名、删除或重检单个节点。
+- **带走配置**：查看原始 YAML，复制或下载所选/全部节点的 YAML、CSV；未选中节点时导出全部。未启用 API 令牌时还可尝试在 Clash 中打开。
+- **查看历史**：最近的终态任务以脱敏、只读快照保存在服务端，可查看和删除。桌面表格与手机结果项共用同一份筛选和排序状态。
+
+## 五分钟启动
+
+需要 Docker 和 Docker Compose plugin（命令为 `docker compose`），以及一个可用的 Clash/Mihomo 订阅或 YAML 文件。
 
 ```bash
+git clone https://github.com/leeflouring/clash-ip-checker.git
+cd clash-ip-checker
+git switch docker
 docker compose config
 docker compose build
 docker compose up -d
-docker compose ps
 curl -fsS http://127.0.0.1:8000/health
+```
+
+浏览器打开 <http://127.0.0.1:8000/ipcheck>。远程部署时，把 `127.0.0.1` 换成服务器地址；`0.0.0.0` 是监听地址，不能作为浏览器访问地址。启动异常可运行 `docker compose ps` 和 `docker compose logs --tail=200 clash-checker` 查看状态。
+
+Compose 只发布宿主机 `8000` 端口。Mihomo 的代理与控制器仅在容器 loopback 上监听；任务文件和历史存放在 `clash-data` volume。镜像支持 amd64 / arm64，容器以 UID 10001、只读根文件系统运行。
+
+## 使用流程
+
+1. 在首页输入订阅 URL，或切换到 YAML 并粘贴内容、选择文件。需要调整模式、超时、回退或 API 令牌时，展开「高级参数」。
+2. 点击「开始检测」。任务运行时可取消；页面会显示实时进度和已得到的节点结果。刷新页面后可用当前会话保存的任务 ID 恢复。
+3. 在结果区筛选、排序和选择节点。任务结束后可改名、删除、重检，或从「导出」菜单获取 YAML / CSV。历史列表位于侧栏，历史快照只能查看和筛选，不能修改或导出。
+
+快速模式默认使用 Ping0。开启回退后，主数据源失败时会尝试另一内置来源，最后尝试第三方 IPQuery；浏览器模式解析失败也可进入这条回退链。IPQuery 不能确认原生/广播属性，因此对应结果会显示“未知”。关闭回退后不会请求 IPQuery。浏览器模式在服务端以 headless shell 运行，较快速模式占用更多内存；单个 Mihomo 工作进程串行检测节点。
+
+## 常用配置
+
+可在 `docker-compose.yml` 的 `environment` 中设置，或通过 Compose 环境变量传入。以下是应用默认值；Compose 文件显式设置的值以 Compose 为准。
+
+| 变量 | 默认值 | 用途 |
+| --- | --- | --- |
+| `API_TOKEN` | 空 | 保护任务、结果、订阅和历史 API；建议对外提供服务时设置 |
+| `ALLOW_PRIVATE_SUBSCRIPTIONS` | `false` | 默认拒绝私网订阅地址及带凭据的 URL；仅在明确需要时允许私网目标 |
+| `SOURCE` / `FALLBACK` | `ping0` / `true` | 快速检测首选来源及失败回退 |
+| `REQUEST_TIMEOUT` | `15` | 单次检测请求超时，单位秒 |
+| `MAX_QUEUE_SIZE` / `MAX_AGE` | `10` / `360` | 队列上限及兼容订阅缓存秒数 |
+| `JOB_TTL` / `MAX_JOBS` | `3600` / `100` | 内存任务保留秒数及历史记录上限 |
+| `MAX_SUBSCRIPTION_BYTES` / `MAX_REDIRECTS` | `5242880` / `3` | 订阅下载大小及重定向边界 |
+| `DATA_DIR` / `CONFIG_PATH` | `/data/jobs` / `/app/config.yaml` | 持久数据与应用配置路径 |
+
+设置 `API_TOKEN` 后，页面中的令牌只保留在当前页面内存中，受保护 API 改用 Bearer 授权轮询。Clash deep link 和直接使用兼容订阅地址 `/check` 无法携带该请求头；请下载 YAML 后导入客户端，或在 TLS 反向代理层配置相应认证。`/health`、静态资源和 UI 配置接口仍公开。
+
+## 数据与安全边界
+
+浏览器 `sessionStorage` 只保存不透明任务 ID，不持久化订阅 URL、API 令牌或原始 YAML。服务端会保存检测所需的生成配置；最近历史只保留脱敏标签、终态统计和公开结果行，不保存订阅 URL、令牌、原始 YAML 或代理凭据。默认拒绝私网订阅目标和 URL 内嵌凭据。对公网开放时，请设置访问令牌，并通过 TLS 反向代理及防火墙限制访问。
+
+## 升级与排障
+
+升级前先备份 `clash-data` volume。更新代码后执行：
+
+```bash
+docker compose build --pull
+docker compose up -d
+docker compose ps
 docker compose logs --tail=200 clash-checker
 ```
 
-服务发布 `8000`；Mihomo mixed/controller 仅 loopback（7890/9090），无 DNS listener。named volume `clash-data` 挂载 `/data`（jobs `/data/jobs`、Mihomo `/data/mihomo`），容器以 UID 10001、只读 rootfs 运行并 `restart: unless-stopped`。
+需要回滚时，切回旧镜像并在必要时恢复 volume。旧版 `./data` 目录应先迁移到 volume 的 `/data/jobs`。浏览器模式内存不足时提高容器内存；队列满时检查提交速率及 `MAX_QUEUE_SIZE`。更完整的部署说明见 [DEPLOY_GCP.md](./DEPLOY_GCP.md)。
 
-## 使用
+## 开发与验证
 
-打开 [`http://127.0.0.1:8000/`](http://127.0.0.1:8000/)，可输入订阅 URL、粘贴或上传 YAML，选择 fast/browser。远程部署请把 `127.0.0.1` 换成服务器实际 IP；不要用监听地址 `0.0.0.0`。结果支持表头筛选和排序、失败原因、表格或 raw YAML，导出选中/全部 YAML 或 CSV、复制、Clash deep-link。任务结束后可编辑、删除、单节点 recheck；运行中可 cancel，断线可 reconnect。最近终态结果以只读快照保存在 `/data/jobs/history.json`，可查看或删除，最多保留 `MAX_JOBS` 条。跳过关键词留空时使用服务器默认值，自动略过剩余流量、重置和到期等订阅信息节点。`/ipcheck` 与旧版 `GET /check?url=` 兼容入口保留。
-
-容器不含 GUI 或桌面环境，browser 模式固定 headless，不支持 headed；headless shell 比完整 Chromium 镜像小，但仍显著大于仅支持 fast 模式的基础镜像。兼容订阅入口会按内容与有效选项复用缓存；单 Mihomo worker 限制吞吐，browser 模式更耗内存。浏览器 sessionStorage 仅存 job ID，URL 和 API 令牌不持久化。
-
-启用回退时，fast 模式会在主要 Ping0/IPPure 失败后尝试另一个来源，最后匿名请求第三方 IPQuery；browser 解析失败时也会进入该 fast 回退链。IPQuery 只能提供风险与机房/移动属性，不能证明原生或广播，因此原生性显示为“未知”。关闭回退不会请求 IPQuery。
-
-## 配置
-
-| 环境变量 | Compose 默认值 | 说明 |
-| --- | --- | --- |
-| `DATA_DIR` | `/data/jobs` | 任务与结果目录 |
-| `CONFIG_PATH` | `/app/config.yaml` | 应用配置文件 |
-| `CLASH_API_URL` / `PORT` | `http://127.0.0.1:9090` / `8000` | 内部控制器 / Web 端口 |
-| `MAX_QUEUE_SIZE` / `MAX_AGE` | `10` / `360` | 队列上限 / 兼容订阅缓存秒数 |
-| `REQUEST_TIMEOUT` / `SOURCE` / `FALLBACK` | `15` / `ping0` / `true` | 检测策略 |
-| `MAX_SUBSCRIPTION_BYTES` / `MAX_REDIRECTS` | `5242880` / `3` | 下载边界 |
-| `JOB_TTL` / `MAX_JOBS` | `3600` / `100` | 内存任务 TTL / 持久历史条数上限 |
-| `ALLOW_PRIVATE_SUBSCRIPTIONS` | `false` | 明确允许私网订阅目标 |
-| `SHOW_ADVANCED_SETTINGS` / `API_TOKEN` | `false` / 空 | UI 与访问控制 |
-
-设置 `API_TOKEN` 后 job/result/subscription/history 路由需 `Authorization: Bearer …`，health、静态资源和 UI 配置仍公开；UI token 只在内存中，并改用授权轮询。此时 Clash deep-link 和直接订阅 `/check` 无法携带 Bearer，请下载 YAML 导入或在 TLS 反向代理层提供合适认证。安全默认拒绝 SSRF 内网地址和带 credentials 的 URL。
-
-历史文件只包含脱敏标签、终态统计和已公开的结果行；不会写入订阅 URL、API token、原始 YAML、代理配置或凭据。
-
-## 升级、回滚与排障
-
-升级前备份 Compose volume `clash-data`，拉取代码后执行 `docker compose build --pull && docker compose up -d`。回滚时把 Compose image 改回旧标签后重新 `up -d`；必要时恢复 volume。旧版 `./data` 内容请先复制到新 volume 的 `/data/jobs`。使用 `docker compose ps`、`logs` 与 `/health` 检查 Mihomo；browser 内存不足请增加内存，权限错误确认 UID 10001 可写 `/data`，队列满则调低提交速率或增大 `MAX_QUEUE_SIZE`。公网部署请限制防火墙来源。
-
-## 架构构建
+核心 API 保留 `/ipcheck` 和旧版 `GET /check?url=` 兼容入口。代码库的单元测试使用模拟检测源，无需真实订阅即可运行：
 
 ```bash
-docker buildx build --platform linux/amd64,linux/arm64 -t clash-ip-checker:local .
+python -m pip install -r requirements.txt
+python -m unittest discover -s tests -v
+node --check static/js/app.js
 ```
 
-GCP 部署见 [DEPLOY_GCP.md](./DEPLOY_GCP.md)，英文版见 [README_EN.md](./README_EN.md)。
+多架构镜像可用 `docker buildx build --platform linux/amd64,linux/arm64 -t clash-ip-checker:local .` 构建。
+
+项目基于 [tombcato/clash-ip-checker](https://github.com/tombcato/clash-ip-checker) 持续改造，遵循仓库中的 [GPL-3.0 许可证](./LICENSE)。

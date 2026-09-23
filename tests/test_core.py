@@ -7,15 +7,18 @@ import uuid
 from unittest.mock import AsyncMock, Mock, patch
 
 import yaml
+from fastapi import HTTPException
 
 from core.checker_service import CheckerService
-from core.job_manager import JobManager
+from core.job_manager import JobManager, JobStatus
 from core.sources.ipquery import IPQuerySource
 from main import (
     build_output_key,
     fetch_subscription,
     is_valid_clash,
+    job_events,
     normalize_options,
+    seed_results,
     validate_subscription_url,
 )
 
@@ -59,6 +62,58 @@ class FakeChecker:
 
 
 class JobManagerTests(unittest.IsolatedAsyncioTestCase):
+    async def test_seeded_progress_lookup_scales_linearly(self):
+        class CountedRows(list):
+            visits = 0
+
+            def __iter__(self):
+                for row in super().__iter__():
+                    self.visits += 1
+                    yield row
+
+            def __getitem__(self, index):
+                self.visits += 1
+                return super().__getitem__(index)
+
+        count = 1000
+        job = JobStatus("source", "output", "config.yaml")
+        job.results = CountedRows(
+            seed_results([{"name": f"node-{index}"} for index in range(count)])
+        )
+        for node_id in range(count):
+            await job.update_progress(
+                node_id + 1,
+                count,
+                "checked",
+                {"id": node_id, "name": f"checked-{node_id}", "status": "checked"},
+            )
+
+        # A linear scan visits 500,500 rows for this same workload.
+        self.assertLessEqual(job.results.visits, count * 2)
+        self.assertEqual(len(job.results), count)
+        self.assertEqual(job.results[-1]["name"], "checked-999")
+
+    async def test_progress_preserves_sparse_ids_and_snapshot_isolation(self):
+        job = JobStatus("source", "output", "config.yaml")
+        job.results = [
+            {"id": 2, "name": "two"},
+            {"id": 0, "name": "zero"},
+            {"id": 9, "name": "nine"},
+        ]
+        before = job.snapshot()
+        result = {"id": 0, "name": "updated"}
+        await job.update_progress(1, 3, "updated", result)
+        result["name"] = "caller mutation"
+        await job.update_progress(2, 3, "updated", {"id": 9, "name": "updated nine"})
+        await job.update_progress(3, 3, "new", {"id": 12, "name": "twelve"})
+
+        self.assertEqual([row["id"] for row in job.results], [2, 0, 9, 12])
+        self.assertEqual(job.results[1]["name"], "updated")
+        self.assertEqual(before["results"][1]["name"], "zero")
+        snapshot = job.snapshot()
+        snapshot["results"][0]["name"] = "snapshot mutation"
+        self.assertEqual(job.results[0]["name"], "two")
+
     async def test_duplicate_reuse_and_replacement_are_isolated(self):
         manager = JobManager(FakeChecker(), max_queue_size=3)
         first = await manager.submit_job(
@@ -300,6 +355,103 @@ class JobManagerTests(unittest.IsolatedAsyncioTestCase):
 
             self.assertEqual(job.status, "completed")
             self.assertEqual(await manager.list_history(), [])
+
+
+class JobEventTests(unittest.IsolatedAsyncioTestCase):
+    async def test_unchanged_snapshots_only_send_heartbeat_and_changes(self):
+        job = JobStatus("source", "output", "config.yaml")
+        job.results = [{"id": 0, "status": "pending"}]
+        polls = 0
+
+        async def advance(interval):
+            nonlocal polls
+            self.assertEqual(interval, 0.5)
+            polls += 1
+            if polls == 1:
+                job.status = "running"
+            elif polls == 2:
+                # Rows can change in place without a progress/status change.
+                job.results[0]["risk"] = "12%"
+            elif polls == 40:
+                job.results[0]["status"] = "checked"
+                await job.complete()
+
+        with (
+            patch("main._job_or_404", return_value=job),
+            patch("main.time", Mock(monotonic=lambda: polls * 0.5)),
+            patch("main.asyncio.sleep", new=advance),
+            patch("main.json.dumps", wraps=json.dumps) as serialize,
+        ):
+            response = await job_events(job.job_id)
+            events = [event async for event in response.body_iterator]
+
+        data = [json.loads(event[6:]) for event in events if event.startswith("data: ")]
+        self.assertEqual(
+            [event["status"] for event in data],
+            ["queued", "running", "running", "completed"],
+        )
+        self.assertNotIn("risk", data[1]["results"][0])
+        self.assertEqual(data[2]["results"][0]["risk"], "12%")
+        self.assertEqual(data[-1]["results"][0]["status"], "checked")
+        self.assertEqual(data[0]["results"][0]["status"], "pending")
+        self.assertEqual(serialize.call_count, 4)
+        self.assertEqual(events.count(": keep-alive\n\n"), 1)
+        self.assertEqual(response.headers["x-accel-buffering"], "no")
+
+    async def test_terminal_transition_while_sending_is_not_lost(self):
+        for terminal in ("completed", "cancelled", "error"):
+            with self.subTest(terminal=terminal):
+                job = JobStatus("source", "output", "config.yaml")
+                with (
+                    patch("main._job_or_404", return_value=job),
+                    patch("main.asyncio.sleep", new=AsyncMock()),
+                ):
+                    response = await job_events(job.job_id)
+                    stream = response.body_iterator
+                    initial = json.loads((await anext(stream))[6:])
+                    self.assertEqual(initial["status"], "queued")
+                    # The server can finish a job while a slow client receives
+                    # the previous frame. Its terminal frame must precede EOF.
+                    job.status = terminal
+                    final = json.loads((await anext(stream))[6:])
+                    self.assertEqual(final["status"], terminal)
+                    with self.assertRaises(StopAsyncIteration):
+                        await anext(stream)
+
+                    # Every reconnect starts with a full current snapshot.
+                    reconnect = await job_events(job.job_id)
+                    frames = [event async for event in reconnect.body_iterator]
+                    self.assertEqual(len(frames), 1)
+                    self.assertEqual(json.loads(frames[0][6:]), job.snapshot())
+
+    async def test_unknown_job_fails_before_stream_headers(self):
+        with patch("main.job_manager.get_job", return_value=None):
+            with self.assertRaises(HTTPException) as raised:
+                await job_events("missing")
+        self.assertEqual(raised.exception.status_code, 404)
+
+    async def test_retention_cleanup_does_not_drop_connected_terminal_frame(self):
+        manager = JobManager(FakeChecker(), ttl=0)
+        job = JobStatus("source", "output", "missing-event-test.yaml")
+        manager.jobs_by_id[job.job_id] = job
+        with (
+            patch("main.job_manager", manager),
+            patch("main.asyncio.sleep", new=AsyncMock()),
+        ):
+            response = await job_events(job.job_id)
+            stream = response.body_iterator
+            self.assertEqual(json.loads((await anext(stream))[6:])["status"], "queued")
+            await job.complete()
+            with (
+                patch("core.job_manager.time.time", return_value=job.finish_time + 1),
+                patch("core.job_manager.os.remove"),
+            ):
+                self.assertIsNone(manager.get_job(job_id=job.job_id))
+
+            final = json.loads((await anext(stream))[6:])
+            self.assertEqual(final, job.snapshot())
+            with self.assertRaises(StopAsyncIteration):
+                await anext(stream)
 
 
 class FetchAndValidationTests(unittest.TestCase):

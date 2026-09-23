@@ -185,6 +185,34 @@ class WorkspaceApiTests(unittest.TestCase):
         self.assertIn('id="return-current"', page.text)
         self.assertIn('id="filter-name"', page.text)
         self.assertIn('id="filter-status"', page.text)
+        self.assertIn('id="mobile-results"', page.text)
+        self.assertIn('id="mobile-filter-name"', page.text)
+        self.assertIn('id="mobile-filter-status"', page.text)
+        self.assertIn('id="mobile-sort"', page.text)
+        self.assertIn('class="global-bar"', page.text)
+        self.assertIn('class="command-deck"', page.text)
+        self.assertIn('class="data-plane"', page.text)
+        self.assertIn('id="sidebar"', page.text)
+        self.assertIn('id="history-count-badge"', page.text)
+        self.assertIn(
+            'id="tab-table" class="view-tab active" type="button" '
+            'role="tab" aria-selected="true" aria-controls="table-view"',
+            page.text,
+        )
+        self.assertIn(
+            'id="table-view" class="result-view" role="tabpanel" '
+            'aria-labelledby="tab-table"',
+            page.text,
+        )
+        self.assertIn(
+            'id="table-wrap" class="table-wrap" role="region" '
+            'aria-label="节点检查结果表格，可横向滚动" tabindex="0"',
+            page.text,
+        )
+        self.assertIn(
+            '<meta name="color-scheme" content="light">',
+            page.text,
+        )
         for key in (
             "name",
             "ip",
@@ -204,10 +232,19 @@ class WorkspaceApiTests(unittest.TestCase):
         self.assertNotIn('$("#fallback").disabled = browserMode', app_script)
         self.assertIn('api("/api/history")', app_script)
         self.assertIn("state.historyMode", app_script)
+        self.assertIn("setSidebar(false)", app_script)
+        self.assertIn("historyCountBadge.textContent", app_script)
+        self.assertNotIn("—", page.text + app_script)
+        self.assertNotIn("–", page.text + app_script)
+        stylesheet = self.client.get("/static/css/style.css")
         self.assertIn(
             "text/css",
-            self.client.get("/static/css/style.css").headers["content-type"],
+            stylesheet.headers["content-type"],
         )
+        self.assertIn("color-scheme: light", stylesheet.text)
+        self.assertNotIn("background-image: linear-gradient", stylesheet.text)
+        self.assertIn("transform: scaleX(var(--progress))", stylesheet.text)
+        self.assertNotIn("overflow-x: clip", stylesheet.text)
         self.assertEqual(
             main.mask_subscription_label(
                 "https://secret.example/private/token?auth=hidden"

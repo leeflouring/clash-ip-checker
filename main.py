@@ -657,15 +657,26 @@ async def history_delete(job_id: str):
 
 @app.get("/api/jobs/{job_id}/events")
 async def job_events(job_id: str):
+    # Keep this exact job through its final frame even if retention removes it
+    # from the manager while the client is receiving an earlier frame.
+    job = _job_or_404(job_id)
+
     async def event_generator():
+        previous = None
+        last_event = time.monotonic()
         while True:
-            job = _job_or_404(job_id)
-            yield (
-                "data: "
-                + json.dumps(job.snapshot(), ensure_ascii=False)
-                + "\n\n"
-            )
-            if job.status in TERMINAL_STATUSES:
+            snapshot = job.snapshot()
+            now = time.monotonic()
+            if snapshot != previous:
+                previous = snapshot
+                last_event = now
+                yield "data: " + json.dumps(snapshot, ensure_ascii=False) + "\n\n"
+            elif now - last_event >= 15:
+                last_event = now
+                yield ": keep-alive\n\n"
+            # Test the emitted snapshot: the job may finish while yield is
+            # suspended, in which case its final state still needs delivery.
+            if snapshot["status"] in TERMINAL_STATUSES:
                 break
             await asyncio.sleep(0.5)
 

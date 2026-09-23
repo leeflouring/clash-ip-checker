@@ -38,6 +38,18 @@ per container is required.
   a mutable URL/source mapping to find the job they are executing.
 - Terminal states are `completed`, `cancelled`, and `error`; late progress is
   ignored.
+- Result progress may use the original numeric ID as a list position only after
+  checking bounds and the stored row's ID. Sparse or reordered rows must fall
+  back to identity lookup; never assume delete/recheck results stay contiguous.
+- `/api/jobs/{id}/events` validates the job before streaming headers, sends a
+  full initial snapshot, then sends only changed snapshots at the existing
+  0.5-second sampling interval. An unchanged stream gets a comment heartbeat
+  after 15 seconds. Compare copied snapshots, not references to live results,
+  so in-place row changes remain observable. Close only after the emitted
+  snapshot is terminal; live job state may change while a yield is suspended.
+  An established stream retains the initially validated JobStatus through that
+  terminal delivery even if retention cleanup removes it from the registry;
+  new requests for an evicted job still return 404.
 - Public node results contain `id`, `original_name`, `name`, `ip`, `risk`,
   `bot`, `shared`, `type`, `native`, `source`, `error`, `degraded`, and
   `status`. `error` is whitespace-normalized, limited to 240 characters, and
@@ -134,6 +146,12 @@ per container is required.
 - Atomic queue admission rejects excess work.
 - Cancelled jobs ignore late progress and snapshots do not expose mutable
   result dictionaries.
+- Seeded result updates scale linearly across a job; sparse and reordered IDs
+  retain stable identity and copied-result isolation.
+- SSE suppresses duplicate data frames, emits heartbeats and in-place result
+  changes, and delivers completed/cancelled/error snapshots even if the job
+  terminates during a previous yield. Reconnect gets a full snapshot, and an
+  unknown job returns 404 before response headers.
 - Output keys vary with effective transformation options.
 - Identical completed workspace requests within `max_age` return the same job;
   changing a transformation option returns a different job.

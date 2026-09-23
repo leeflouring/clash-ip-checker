@@ -3,85 +3,94 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="检测 Clash 节点 IP 纯净度，并以表格预览、编辑和导出结果。">
+  <meta name="description" content="检测 Clash 节点 IP 纯净度，并在工作台中筛选、编辑和导出结果。">
   <meta name="color-scheme" content="light">
   <title>Clash IP Checker · 节点结果工作台</title>
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230f766e'/%3E%3Cpath d='M9 8h14v4H13v8h10v4H9z' fill='white'/%3E%3C/svg%3E">
-  <link rel="stylesheet" href="/static/css/style.css">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='5' fill='%232fc4ad'/%3E%3Cpath d='M9 8h14v4H13v8h10v4H9z' fill='%230b1412'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="/static/css/style.css?v=20260922-workspace">
 </head>
 <body>
   <a class="skip-link" href="#main">跳到主要内容</a>
 
-  <header class="topbar">
-    <a class="brand" href="/ipcheck" aria-label="Clash IP Checker 首页">
-      <span class="brand-mark" aria-hidden="true">C</span>
-      <span>Clash IP Checker</span>
-    </a>
-    <div class="runtime">
-      <span class="runtime-dot" aria-hidden="true"></span>
-      <span id="state" aria-live="polite">等待任务</span>
+  <button id="sidebar-backdrop" class="sidebar-backdrop" type="button" aria-label="关闭导航" hidden></button>
+  <aside id="sidebar" class="sidebar" aria-label="工作空间导航">
+    <div class="sidebar-top">
+      <a class="brand" href="/ipcheck" aria-label="Clash IP Checker 首页">
+        <span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><path d="M5 8.5 12 4l7 4.5v7L12 20l-7-4.5z"/><path d="m8 12 3 3 5-6"/></svg></span>
+        <span>Clash<span class="brand-subtitle">IP Checker</span></span>
+      </a>
+      <button id="sidebar-close" class="icon-button sidebar-close" type="button" aria-label="关闭导航">×</button>
     </div>
-  </header>
-
-  <main id="main" class="shell">
-    <section class="intro" aria-labelledby="page-title">
-      <div>
-        <p class="eyebrow">节点纯净度检测</p>
-        <h1 id="page-title">把 YAML 里的结果，<br>变成一眼能读懂的表格。</h1>
+    <button id="new-check" class="new-check" type="button"><span aria-hidden="true">＋</span> 新建检测</button>
+    <button id="current-task" class="current-task" type="button" hidden><span class="activity-dot" aria-hidden="true"></span>返回当前任务</button>
+    <section id="history-panel" class="history-panel" aria-labelledby="history-title">
+      <div class="history-heading">
+        <h2 id="history-title">最近检测 <span id="history-count-badge" class="history-count-badge" aria-label="历史记录数量">0</span></h2>
+        <button id="refresh-history" class="icon-button" type="button" aria-label="刷新历史记录" title="刷新历史记录">↻</button>
       </div>
-      <p class="intro-copy">提交订阅或粘贴 Clash YAML。结果会实时进入工作台，可筛选导出、改名、删除或单独重检。</p>
+      <p id="history-status" class="history-status" aria-live="polite">正在加载…</p>
+      <ul id="history-list" class="history-list" aria-label="历史检测记录"></ul>
     </section>
+    <div class="sidebar-footer"><span class="privacy-symbol" aria-hidden="true">◇</span><div><strong>你的配置，留在你的掌控中</strong><p>订阅地址不写入浏览器存储<br>历史仅保留脱敏检测结果</p></div></div>
+  </aside>
+  <div class="main-shell">
+    <header class="global-bar">
+      <div class="header-start"><button id="sidebar-toggle" class="icon-button sidebar-toggle" type="button" aria-label="打开导航" aria-controls="sidebar" aria-expanded="false"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg></button><span class="workspace-name">节点工作空间</span><span class="header-divider">/</span><span class="header-caption">IP 质量检测</span></div>
+      <div class="live-state" aria-label="当前任务状态"><span id="state" class="status-badge" data-status="idle" aria-live="polite">等待任务</span></div>
+    </header>
+    <main id="main" class="app-shell" data-layout="compose">
+      <div id="welcome" class="welcome">
+        <span class="welcome-symbol" aria-hidden="true"><svg viewBox="0 0 48 48" fill="none"><path d="M24 5v10m0 18v10M5 24h10m18 0h10M10.5 10.5l7 7m13 13 7 7m0-27-7 7m-13 13-7 7"/><circle cx="24" cy="24" r="7"/></svg></span>
+        <p class="eyebrow">CLASH IP CHECKER</p>
+        <h1>让每一个连接，心中有数。</h1>
+        <p>检查节点 IP 质量，找到更适合你的连接。</p>
+      </div>
+    <section id="command-deck" class="command-deck" aria-labelledby="command-title">
+      <div class="composer-heading"><h2 id="command-title">开始一次检测</h2><button id="close-composer" class="text-button" type="button" hidden>返回结果</button></div>
+      <form id="start-form" data-source-mode="url">
+        <div class="command-primary">
+          <fieldset class="source-fieldset">
+            <legend class="sr-only">配置来源</legend>
+            <div class="segmented" role="radiogroup" aria-label="配置来源">
+              <label>
+                <input type="radio" name="kind" value="url" checked>
+                <span>订阅链接</span>
+              </label>
+              <label>
+                <input type="radio" name="kind" value="yaml">
+                <span>粘贴 YAML</span>
+              </label>
+            </div>
+          </fieldset>
 
-    <section class="input-panel" aria-labelledby="input-title">
-      <form id="start-form">
-        <div class="section-heading">
-          <div>
-            <p class="step">01</p>
-            <h2 id="input-title">选择配置来源</h2>
+          <div id="url-pane" class="source-pane url-pane">
+            <label class="field-label" for="url">订阅 URL</label>
+            <input id="url" type="url" inputmode="url" placeholder="粘贴你的 Clash 订阅链接…" autocomplete="off" aria-describedby="url-help" pattern="https?://.+" title="请输入以 http:// 或 https:// 开头的订阅地址" required>
+            <p id="url-help" class="field-help">支持公开 HTTP / HTTPS 订阅链接</p>
           </div>
-          <p class="privacy-note">订阅地址只用于本次请求，不会保存在浏览器。</p>
+
+          <div id="yaml-pane" class="source-pane yaml-pane" hidden>
+            <div class="yaml-heading">
+              <label class="field-label" for="yaml">Clash YAML</label>
+              <div class="file-row">
+                <label class="file-button" for="yaml-file">上传文件</label>
+                <input id="yaml-file" class="sr-only" type="file" accept=".yaml,.yml,application/yaml,text/yaml,text/plain">
+                <span id="file-name">支持 .yaml / .yml，最大 5 MB</span>
+              </div>
+            </div>
+            <textarea id="yaml" rows="8" spellcheck="false" placeholder="proxies:&#10;  - name: node-a&#10;    type: ss" disabled></textarea>
+          </div>
         </div>
 
-        <fieldset class="source-fieldset">
-          <legend class="sr-only">配置来源</legend>
-          <div class="segmented" role="radiogroup" aria-label="配置来源">
-            <label>
-              <input type="radio" name="kind" value="url" checked>
-              <span>订阅 URL</span>
-            </label>
-            <label>
-              <input type="radio" name="kind" value="yaml">
-              <span>粘贴 / 上传 YAML</span>
-            </label>
-          </div>
-
-          <div id="url-pane" class="source-pane">
-            <label class="field-label" for="url">订阅地址</label>
-            <div class="input-row">
-              <input id="url" type="url" inputmode="url" placeholder="https://example.com/subscription" autocomplete="off">
-              <button class="primary" type="submit">开始检测</button>
-            </div>
-            <p class="field-help">支持 HTTP(S) Clash 订阅；默认拒绝内网地址和带凭据的 URL。</p>
-          </div>
-
-          <div id="yaml-pane" class="source-pane" hidden>
-            <label class="field-label" for="yaml">YAML 内容</label>
-            <textarea id="yaml" rows="9" spellcheck="false" placeholder="proxies:&#10;  - name: node-a&#10;    type: ss"></textarea>
-            <div class="file-row">
-              <label class="file-button" for="yaml-file">从文件读取</label>
-              <input id="yaml-file" class="sr-only" type="file" accept=".yaml,.yml,application/yaml,text/yaml,text/plain">
-              <span id="file-name">支持 .yaml / .yml，最大 5 MB</span>
-              <button class="primary" type="submit">开始检测</button>
-            </div>
-          </div>
-        </fieldset>
-
         <details class="advanced">
-          <summary>检测选项</summary>
+          <summary>
+            <span>高级参数</span>
+            <span class="advanced-summary">模式、数据源、超时、缓存与鉴权</span>
+          </summary>
           <div class="option-grid">
             <label>
               <span>检测模式</span>
-              <select id="mode">
+              <select id="mode" aria-describedby="mode-help">
                 <option value="fast">快速 HTTP</option>
                 <option value="browser">浏览器兼容</option>
               </select>
@@ -94,161 +103,183 @@
               </select>
             </label>
             <label>
-              <span>请求超时（秒）</span>
-              <input id="timeout" type="number" min="1" max="120" value="15">
+              <span>请求超时</span>
+              <span class="input-with-unit"><input id="timeout" type="number" min="1" max="120" value="15"><span>秒</span></span>
             </label>
             <label>
-              <span>缓存时长（秒）</span>
-              <input id="max-age" type="number" min="0" max="604800" value="3600">
+              <span>缓存时长</span>
+              <span class="input-with-unit"><input id="max-age" type="number" min="0" max="604800" value="3600"><span>秒</span></span>
             </label>
             <label class="wide-option">
-              <span>跳过关键词（逗号分隔）</span>
+              <span>跳过关键词</span>
               <input id="skip" placeholder="剩余, 到期, 官网">
+              <small>多个关键词使用逗号分隔</small>
             </label>
             <label class="wide-option">
-              <span>API 令牌（服务启用时填写）</span>
+              <span>API 令牌</span>
               <input id="api-token" type="password" autocomplete="off" placeholder="仅保留在当前页面内存">
+              <small>仅在页面内存中使用，不写入浏览器存储</small>
             </label>
             <label class="check-option">
               <input id="fallback" type="checkbox" checked>
               <span>数据源失败时自动回退</span>
             </label>
-            <p class="field-help wide-option">browser 模式固定使用服务器 headless shell，不支持 headed/GUI。</p>
+            <p id="mode-help" class="field-help option-note" hidden>浏览器模式由服务端无头浏览器执行。主要数据源不可选，浏览器失败时仍可进入快速回退链。</p>
           </div>
         </details>
 
-        <div class="form-footer">
-          <p id="form-error" class="form-error" role="alert"></p>
-          <button id="cancel" class="text-button danger-text" type="button" disabled>取消当前任务</button>
-        </div>
+        <div class="composer-footer"><span class="composer-hint">检测 · 筛选 · 导出</span><div class="command-actions"><button class="primary submit-button" type="submit"><span>开始检测</span><span aria-hidden="true">↑</span></button></div></div>
+        <p id="form-error" class="form-error" role="alert"></p>
       </form>
     </section>
+    <p id="composer-note" class="composer-note">从一份配置开始。支持订阅链接、YAML 文本与文件。</p>
 
-    <section class="history-panel" aria-labelledby="history-title">
-      <div class="history-heading">
-        <div>
-          <p class="step">02</p>
-          <h2 id="history-title">最近检测</h2>
+    <section id="workspace" class="data-plane" data-workspace-state="idle" data-history-mode="false" aria-labelledby="results-title">
+      <header class="task-strip">
+        <div class="task-identity">
+          <div class="task-title-row">
+            <h2 id="results-title">检测结果</h2>
+            <p id="history-readonly" class="readonly-badge" hidden>历史快照，只读</p>
+          </div>
+          <p id="job-label" class="job-label">尚未创建任务</p>
         </div>
-        <button id="refresh-history" class="secondary" type="button">刷新</button>
-      </div>
-      <p id="history-status" class="history-status" aria-live="polite">正在加载…</p>
-      <ul id="history-list" class="history-list" aria-label="历史检测记录"></ul>
-    </section>
 
-    <section id="workspace" class="workspace" aria-labelledby="results-title" hidden>
-      <div class="workspace-heading">
-        <div>
-          <p class="step">03</p>
-          <h2 id="results-title">检查结果</h2>
-          <p id="job-label" class="job-label">当前任务</p>
-          <p id="history-readonly" class="history-readonly" hidden>历史快照 · 只读</p>
-        </div>
         <div class="progress-copy">
+          <button id="cancel" class="secondary cancel-button" type="button" disabled hidden>取消任务</button>
           <strong id="progress-count">0 / 0</strong>
-          <span id="progress-message">准备中</span>
+          <span id="progress-message">等待提交配置</span>
+          <button id="edit-config" class="secondary" type="button">新配置</button>
           <button id="return-current" class="text-button" type="button" hidden>返回当前任务</button>
         </div>
-      </div>
+      </header>
 
-      <div class="progress-track" aria-hidden="true">
+      <div class="progress-track" role="progressbar" aria-label="检测进度" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
         <span id="progress-bar"></span>
       </div>
 
       <div class="result-summary" aria-label="结果统计">
-        <div><strong id="stat-total">0</strong><span>节点</span></div>
-        <div><strong id="stat-checked">0</strong><span>已检测</span></div>
-        <div><strong id="stat-risk">0</strong><span>高风险</span></div>
-        <div><strong id="stat-failed">0</strong><span>异常</span></div>
+        <div><span>节点</span><strong id="stat-total">0</strong></div>
+        <div><span>已处理</span><strong id="stat-checked">0</strong></div>
+        <div><span>高风险</span><strong id="stat-risk">0</strong></div>
+        <div><span>异常</span><strong id="stat-failed">0</strong></div>
       </div>
 
       <div class="workspace-toolbar">
         <div class="view-tabs" role="tablist" aria-label="结果视图">
-          <button class="view-tab active" type="button" role="tab" aria-selected="true" data-view="table">表格</button>
-          <button class="view-tab" type="button" role="tab" aria-selected="false" data-view="raw">原始 YAML</button>
+          <button id="tab-table" class="view-tab active" type="button" role="tab" aria-selected="true" aria-controls="table-view" tabindex="0" data-view="table">节点结果</button>
+          <button id="tab-raw" class="view-tab" type="button" role="tab" aria-selected="false" aria-controls="raw-panel" tabindex="-1" data-view="raw">原始 YAML</button>
         </div>
-        <div class="export-actions">
-          <span id="selected-count">未选择时导出全部</span>
-          <button id="copy-yaml" class="secondary" type="button" disabled>复制 YAML</button>
-          <button id="export-yaml" class="secondary" type="button" disabled>下载 YAML</button>
-          <button id="export-csv" class="secondary" type="button" disabled>下载 CSV</button>
-          <button id="open-clash" class="primary compact" type="button" disabled>在 Clash 中打开</button>
-        </div>
-      </div>
-
-      <div id="table-view" role="tabpanel">
-        <div id="empty-state" class="empty-state">
-          <span aria-hidden="true">⌁</span>
-          <h3>结果会逐项出现在这里</h3>
-          <p>任务开始后无需刷新页面。</p>
-        </div>
-        <div id="table-wrap" class="table-wrap" hidden>
-          <table>
-            <thead>
-              <tr>
-                <th class="select-cell">
-                  <input id="select-all" type="checkbox" aria-label="选择当前可见节点">
-                </th>
-                <th class="filter-column name-column" data-sort-header="name" aria-sort="none">
-                  <button class="sort-button" type="button" data-sort="name" data-sort-label="节点名称" aria-label="按节点名称升序排序">节点名称 <span class="sort-arrow" aria-hidden="true">↕</span></button>
-                  <input id="filter-name" class="table-filter" type="search" placeholder="搜索名称" autocomplete="off" aria-label="按节点名称筛选">
-                </th>
-                <th data-sort-header="ip" aria-sort="none">
-                  <button class="sort-button" type="button" data-sort="ip" data-sort-label="出口 IP" aria-label="按出口 IP 升序排序">出口 IP <span class="sort-arrow" aria-hidden="true">↕</span></button>
-                </th>
-                <th data-sort-header="risk" aria-sort="none">
-                  <button class="sort-button" type="button" data-sort="risk" data-sort-label="风险" aria-label="按风险升序排序">风险 <span class="sort-arrow" aria-hidden="true">↕</span></button>
-                </th>
-                <th data-sort-header="shared" aria-sort="none">
-                  <button class="sort-button" type="button" data-sort="shared" data-sort-label="共享 / Bot" aria-label="按共享或 Bot 升序排序">共享 / Bot <span class="sort-arrow" aria-hidden="true">↕</span></button>
-                </th>
-                <th class="filter-column" data-sort-header="type" aria-sort="none">
-                  <button class="sort-button" type="button" data-sort="type" data-sort-label="属性" aria-label="按属性升序排序">属性 <span class="sort-arrow" aria-hidden="true">↕</span></button>
-                  <select id="filter-type" class="table-filter" data-all-label="全部属性" aria-label="按节点属性筛选">
-                    <option value="">全部属性</option>
-                  </select>
-                </th>
-                <th class="filter-column" data-sort-header="native" aria-sort="none">
-                  <button class="sort-button" type="button" data-sort="native" data-sort-label="原生性" aria-label="按原生性升序排序">原生性 <span class="sort-arrow" aria-hidden="true">↕</span></button>
-                  <select id="filter-native" class="table-filter" data-all-label="全部原生性" aria-label="按节点原生性筛选">
-                    <option value="">全部原生性</option>
-                  </select>
-                </th>
-                <th class="filter-column" data-sort-header="source" aria-sort="none">
-                  <button class="sort-button" type="button" data-sort="source" data-sort-label="数据源" aria-label="按数据源升序排序">数据源 <span class="sort-arrow" aria-hidden="true">↕</span></button>
-                  <select id="filter-source" class="table-filter" data-all-label="全部数据源" aria-label="按检测数据源筛选">
-                    <option value="">全部数据源</option>
-                  </select>
-                </th>
-                <th class="filter-column" data-sort-header="status" aria-sort="none">
-                  <button class="sort-button" type="button" data-sort="status" data-sort-label="状态" aria-label="按状态升序排序">状态 <span class="sort-arrow" aria-hidden="true">↕</span></button>
-                  <select id="filter-status" class="table-filter" aria-label="按检测状态筛选">
-                    <option value="">全部状态</option>
-                    <option value="pending">等待</option>
-                    <option value="checked">完成</option>
-                    <option value="failed">异常</option>
-                    <option value="skipped">跳过</option>
-                  </select>
-                </th>
-                <th class="actions-cell">操作</th>
-              </tr>
-            </thead>
-            <tbody id="rows"></tbody>
-          </table>
+        <div class="toolbar-actions">
+          <span id="visible-count" class="visible-count" aria-live="polite">0 个可见节点</span>
+          <button id="clear-filters" class="text-button" type="button" disabled>清除筛选</button>
+          <details id="export-menu" class="export-menu">
+            <summary class="secondary">导出</summary>
+            <div class="export-popover">
+              <p id="selected-count">未选择时导出全部</p>
+              <button id="copy-yaml" type="button" disabled>复制 YAML</button>
+              <button id="export-yaml" type="button" disabled>下载 YAML</button>
+              <button id="export-csv" type="button" disabled>下载 CSV</button>
+              <button id="open-clash" class="primary" type="button" disabled>在 Clash 中打开</button>
+            </div>
+          </details>
         </div>
       </div>
 
-      <div id="raw-panel" role="tabpanel" hidden>
+      <div id="table-view" class="result-view" role="tabpanel" aria-labelledby="tab-table" tabindex="0">
+        <div id="empty-state" class="empty-state" role="status">
+          <span id="empty-state-icon" class="empty-state-code" aria-hidden="true">IDLE</span>
+          <div>
+            <h3 id="empty-state-title">等待检测任务</h3>
+            <p id="empty-state-copy">在上方提交订阅 URL 或 YAML，节点结果会实时写入这里。</p>
+          </div>
+          <button id="empty-state-action" class="secondary" type="button">输入配置</button>
+        </div>
+
+        <div id="results-content" hidden>
+          <div class="mobile-tools" aria-label="移动端结果工具">
+            <details class="mobile-filter-panel">
+              <summary class="secondary">筛选</summary>
+              <div class="mobile-filter-grid">
+                <label>节点名称<input id="mobile-filter-name" type="search" autocomplete="off"></label>
+                <label>属性<select id="mobile-filter-type" data-all-label="全部属性"><option value="">全部属性</option></select></label>
+                <label>原生性<select id="mobile-filter-native" data-all-label="全部原生性"><option value="">全部原生性</option></select></label>
+                <label>数据源<select id="mobile-filter-source" data-all-label="全部数据源"><option value="">全部数据源</option></select></label>
+                <label>状态<select id="mobile-filter-status"><option value="">全部状态</option><option value="pending">等待</option><option value="checked">完成</option><option value="failed">异常</option><option value="skipped">跳过</option></select></label>
+              </div>
+            </details>
+            <label class="mobile-sort-label">排序
+              <select id="mobile-sort">
+                <option value="id">原始顺序</option>
+                <option value="name">节点名称</option>
+                <option value="ip">出口 IP</option>
+                <option value="risk">风险</option>
+                <option value="shared">共享 / Bot</option>
+                <option value="type">属性</option>
+                <option value="native">原生性</option>
+                <option value="source">数据源</option>
+                <option value="status">状态</option>
+              </select>
+            </label>
+            <button id="mobile-sort-direction" class="secondary icon-button" type="button" aria-label="当前升序，点击切换为降序">↑</button>
+          </div>
+
+          <div id="selection-tools" class="selection-tools">
+            <label class="select-visible"><input id="mobile-select-all" type="checkbox">选择当前可见项</label>
+            <span id="selection-note">隐藏的选择会保留</span>
+          </div>
+
+          <div id="table-wrap" class="table-wrap" role="region" aria-label="节点检查结果表格，可横向滚动" tabindex="0">
+            <table>
+              <caption class="sr-only">节点检查结果；表头可排序和筛选</caption>
+              <thead>
+                <tr>
+                  <th class="select-cell"><input id="select-all" type="checkbox" aria-label="选择当前可见节点"></th>
+                  <th class="filter-column name-column" data-sort-header="name" aria-sort="none">
+                    <button class="sort-button" type="button" data-sort="name" data-sort-label="节点名称" aria-label="按节点名称升序排序">节点名称 <span class="sort-arrow" aria-hidden="true">↕</span></button>
+                    <input id="filter-name" class="table-filter" type="search" placeholder="搜索名称" autocomplete="off" aria-label="按节点名称筛选">
+                  </th>
+                  <th data-sort-header="ip" aria-sort="none"><button class="sort-button" type="button" data-sort="ip" data-sort-label="出口 IP" aria-label="按出口 IP 升序排序">出口 IP <span class="sort-arrow" aria-hidden="true">↕</span></button></th>
+                  <th data-sort-header="risk" aria-sort="none"><button class="sort-button" type="button" data-sort="risk" data-sort-label="风险" aria-label="按风险升序排序">风险 <span class="sort-arrow" aria-hidden="true">↕</span></button></th>
+                  <th data-sort-header="shared" aria-sort="none"><button class="sort-button" type="button" data-sort="shared" data-sort-label="共享 / Bot" aria-label="按共享或 Bot 升序排序">共享 / Bot <span class="sort-arrow" aria-hidden="true">↕</span></button></th>
+                  <th class="filter-column" data-sort-header="type" aria-sort="none">
+                    <button class="sort-button" type="button" data-sort="type" data-sort-label="属性" aria-label="按属性升序排序">属性 <span class="sort-arrow" aria-hidden="true">↕</span></button>
+                    <select id="filter-type" class="table-filter" data-all-label="全部属性" aria-label="按节点属性筛选"><option value="">全部属性</option></select>
+                  </th>
+                  <th class="filter-column" data-sort-header="native" aria-sort="none">
+                    <button class="sort-button" type="button" data-sort="native" data-sort-label="原生性" aria-label="按原生性升序排序">原生性 <span class="sort-arrow" aria-hidden="true">↕</span></button>
+                    <select id="filter-native" class="table-filter" data-all-label="全部原生性" aria-label="按节点原生性筛选"><option value="">全部原生性</option></select>
+                  </th>
+                  <th class="filter-column" data-sort-header="source" aria-sort="none">
+                    <button class="sort-button" type="button" data-sort="source" data-sort-label="数据源" aria-label="按数据源升序排序">数据源 <span class="sort-arrow" aria-hidden="true">↕</span></button>
+                    <select id="filter-source" class="table-filter" data-all-label="全部数据源" aria-label="按检测数据源筛选"><option value="">全部数据源</option></select>
+                  </th>
+                  <th class="filter-column" data-sort-header="status" aria-sort="none">
+                    <button class="sort-button" type="button" data-sort="status" data-sort-label="状态" aria-label="按状态升序排序">状态 <span class="sort-arrow" aria-hidden="true">↕</span></button>
+                    <select id="filter-status" class="table-filter" aria-label="按检测状态筛选"><option value="">全部状态</option><option value="pending">等待</option><option value="checked">完成</option><option value="failed">异常</option><option value="skipped">跳过</option></select>
+                  </th>
+                  <th class="actions-cell">操作</th>
+                </tr>
+              </thead>
+              <tbody id="rows"></tbody>
+            </table>
+          </div>
+
+          <div id="mobile-results" class="mobile-results" aria-label="节点检查结果列表"></div>
+        </div>
+      </div>
+
+      <div id="raw-panel" class="raw-panel" role="tabpanel" aria-labelledby="tab-raw" tabindex="0" data-raw-state="idle" hidden>
         <div class="raw-heading">
-          <p>这里显示当前编辑、删除后的完整 Clash 配置。</p>
+          <p>当前编辑和删除操作对应的完整 Clash 配置</p>
           <button id="refresh-raw" class="text-button" type="button">刷新</button>
         </div>
-        <pre id="raw-view" tabindex="0">正在读取…</pre>
+        <pre id="raw-view" class="raw-view" tabindex="0" aria-label="原始 Clash YAML，可横向滚动">正在读取...</pre>
       </div>
     </section>
-  </main>
+    </main>
+  </div>
 
   <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
-  <script src="/static/js/app.js"></script>
+  <script src="/static/js/app.js?v=20260922-workspace"></script>
 </body>
 </html>

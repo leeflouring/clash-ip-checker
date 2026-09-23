@@ -89,6 +89,15 @@ class JobStatus:
         if result is not None:
             result = dict(result)
             node_id = result.get("id")
+            # Workspace rows are seeded in original proxy order. Check identity
+            # before using that position so sparse/reordered rows still work.
+            if (
+                isinstance(node_id, int)
+                and 0 <= node_id < len(self.results)
+                and self.results[node_id].get("id") == node_id
+            ):
+                self.results[node_id] = result
+                return
             for index, previous in enumerate(self.results):
                 if previous.get("id") == node_id:
                     self.results[index] = result
