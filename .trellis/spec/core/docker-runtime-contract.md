@@ -9,7 +9,8 @@ server or installed desktop browser.
 
 ## 2. Signatures
 
-- Build/start: `docker compose up -d --build`
+- Deploy: `docker compose pull && docker compose up -d` from the `main` branch; Compose uses the GHCR image, with `IMAGE_TAG` for version selection.
+- Local build: `docker build -t ghcr.io/leeflouring/clash-ip-checker:local .` and `IMAGE_TAG=local docker compose up -d --pull never`.
 - Web UI: `GET /` and `GET /ipcheck` both return the workspace page. Clients
   use `127.0.0.1`, `localhost`, or the server's real address, never `0.0.0.0`.
 - Health: `GET /health -> 200 {"status":"healthy","mihomo":"ready"}` only
@@ -65,7 +66,7 @@ server or installed desktop browser.
 
 - Good: a headless Linux server runs fast and browser modes using only the
   image-bundled Chromium headless shell.
-- Base: `docker compose up -d --build`, one named volume, one published port,
+- Base: `docker compose pull && docker compose up -d`, one named volume, one published port,
   healthy non-root service.
 - Bad: expose Mihomo controller or mixed proxy on `0.0.0.0`.
 - Bad: use `playwright install --with-deps chromium`, which installs a full

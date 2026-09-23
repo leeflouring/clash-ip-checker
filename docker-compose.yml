@@ -1,7 +1,6 @@
 services:
   clash-checker:
-    build: .
-    image: clash-checker
+    image: ghcr.io/leeflouring/clash-ip-checker:${IMAGE_TAG:-latest}
     ports: ["8000:8000"]
     environment:
       DATA_DIR: /data/jobs

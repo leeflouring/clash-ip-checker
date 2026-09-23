@@ -6,6 +6,8 @@
 
 [English](./README_EN.md) · [部署说明](./DEPLOY_GCP.md) · [许可证](./LICENSE)
 
+[![Docker 镜像构建](https://github.com/leeflouring/clash-ip-checker/actions/workflows/docker-image.yml/badge.svg?branch=main)](https://github.com/leeflouring/clash-ip-checker/actions/workflows/docker-image.yml)
+
 ![Clash IP Checker 新建检测界面](./docs/assets/workspace-overview.png)
 
 <details>
@@ -34,16 +36,15 @@
 ```bash
 git clone https://github.com/leeflouring/clash-ip-checker.git
 cd clash-ip-checker
-git switch docker
 docker compose config
-docker compose build
+docker compose pull
 docker compose up -d
 curl -fsS http://127.0.0.1:8000/health
 ```
 
 浏览器打开 <http://127.0.0.1:8000/ipcheck>。远程部署时，把 `127.0.0.1` 换成服务器地址；`0.0.0.0` 是监听地址，不能作为浏览器访问地址。启动异常可运行 `docker compose ps` 和 `docker compose logs --tail=200 clash-checker` 查看状态。
 
-Compose 只发布宿主机 `8000` 端口。Mihomo 的代理与控制器仅在容器 loopback 上监听；任务文件和历史存放在 `clash-data` volume。镜像支持 amd64 / arm64，容器以 UID 10001、只读根文件系统运行。
+Compose 默认拉取 `ghcr.io/leeflouring/clash-ip-checker:latest`，只发布宿主机 `8000` 端口。Mihomo 的代理与控制器仅在容器 loopback 上监听；任务文件和历史存放在 `clash-data` volume。镜像支持 amd64 / arm64，容器以 UID 10001、只读根文件系统运行。每次推送到 `main`，GitHub Actions 会构建并发布 `latest`、`main` 和 `sha-...` 镜像标签；`v*` Git 标签还会发布版本标签。拉取私有 GHCR 包时，先使用具备 `read:packages` 权限的令牌执行 `docker login ghcr.io`。
 
 ## 使用流程
 
@@ -76,16 +77,16 @@ Compose 只发布宿主机 `8000` 端口。Mihomo 的代理与控制器仅在容
 
 ## 升级与排障
 
-升级前先备份 `clash-data` volume。更新代码后执行：
+升级前先备份 `clash-data` volume。更新 `main` 分支代码后执行：
 
 ```bash
-docker compose build --pull
+docker compose pull
 docker compose up -d
 docker compose ps
 docker compose logs --tail=200 clash-checker
 ```
 
-需要回滚时，切回旧镜像并在必要时恢复 volume。旧版 `./data` 目录应先迁移到 volume 的 `/data/jobs`。浏览器模式内存不足时提高容器内存；队列满时检查提交速率及 `MAX_QUEUE_SIZE`。更完整的部署说明见 [DEPLOY_GCP.md](./DEPLOY_GCP.md)。
+需要回滚时，将 `IMAGE_TAG` 指向之前的 `sha-...` 标签并执行 `docker compose up -d`，必要时恢复 volume。旧版 `./data` 目录应先迁移到 volume 的 `/data/jobs`。浏览器模式内存不足时提高容器内存；队列满时检查提交速率及 `MAX_QUEUE_SIZE`。更完整的部署说明见 [DEPLOY_GCP.md](./DEPLOY_GCP.md)。
 
 ## 开发与验证
 
@@ -97,6 +98,6 @@ python -m unittest discover -s tests -v
 node --check static/js/app.js
 ```
 
-多架构镜像可用 `docker buildx build --platform linux/amd64,linux/arm64 -t clash-ip-checker:local .` 构建。
+本地构建可运行 `docker build -t ghcr.io/leeflouring/clash-ip-checker:local .`，然后运行 `IMAGE_TAG=local docker compose up -d --pull never`。多架构发布由 GitHub Actions 完成。
 
 项目基于 [tombcato/clash-ip-checker](https://github.com/tombcato/clash-ip-checker) 持续改造，遵循仓库中的 [GPL-3.0 许可证](./LICENSE)。
